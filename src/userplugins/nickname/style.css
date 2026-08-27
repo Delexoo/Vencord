@@ -1,5 +1,5 @@
 .vc-nickname-handle {
-    cursor: text;
+    cursor: text !important;
 }
 
 .vc-nickname-handle:hover {
@@ -13,22 +13,14 @@
 }
 
 .vc-nickname-input {
-    display: inline-block;
     box-sizing: border-box;
     margin: 0;
-    padding: 0;
+    padding: 0 2px;
     border: none;
     border-bottom: 1px dashed currentColor;
     border-radius: 0;
     background: transparent;
-    color: inherit;
-    font: inherit;
-    letter-spacing: inherit;
-    line-height: inherit;
-    text-align: inherit;
     outline: none;
     min-width: 4ch;
-    max-width: 100%;
-    width: auto;
-    vertical-align: baseline;
+    caret-color: currentColor;
 }
