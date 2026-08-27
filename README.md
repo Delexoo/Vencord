@@ -1,3 +1,21 @@
+<p align="center">
+  <a href="https://github.com/Delexoo/Vencord/stargazers"><img src="https://img.shields.io/github/stars/Delexoo/Vencord?style=for-the-badge&logo=github&logoColor=white&color=eb459e" alt="Stars" /></a>
+  <a href="https://github.com/Delexoo/Vencord/forks"><img src="https://img.shields.io/github/forks/Delexoo/Vencord?style=for-the-badge&logo=github&logoColor=white&color=5865F2" alt="Forks" /></a>
+  <a href="https://github.com/Delexoo/Vencord/releases"><img src="https://img.shields.io/github/v/release/Delexoo/Vencord?style=for-the-badge&color=23a55a" alt="Latest release" /></a>
+  <a href="https://github.com/Delexoo/Vencord/releases"><img src="https://img.shields.io/github/downloads/Delexoo/Vencord/total?style=for-the-badge&color=f0b232" alt="Downloads" /></a>
+</p>
+<p align="center">
+  <img src="https://img.shields.io/badge/Discord-Client%20Mod-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord" />
+  <img src="https://img.shields.io/badge/Windows-Installer-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Windows" />
+  <img src="https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
+  <img src="https://img.shields.io/badge/React-61DAFB?style=for-the-badge&logo=react&logoColor=000" alt="React" />
+  <img src="https://img.shields.io/badge/GPL--3.0-license-red?style=for-the-badge" alt="GPL-3.0" />
+</p>
+<p align="center">
+  <a href="https://vencord.dev"><img src="https://img.shields.io/badge/Built%20on-Vencord-c3a3ce?style=for-the-badge" alt="Vencord" /></a>
+  <a href="https://buy.stripe.com/9B63cu3RE2ouaKgcHLcjS00"><img src="https://img.shields.io/badge/Support%20Delexo-%E2%9D%A4-eb459e?style=for-the-badge" alt="Support Delexo" /></a>
+</p>
+
 ## Download
 
 One click. Run the installer. Official Vencord plus Delexo Plugins.
