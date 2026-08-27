@@ -20,6 +20,7 @@ import {
     openModal,
     Parser,
     RestAPI,
+    ScrollerThin,
     Select,
     Text,
     UserStore,
@@ -409,18 +410,20 @@ function MentionsPage({ modalProps }: { modalProps: RenderModalProps; }) {
                                 ? ` · ${hiddenByTime} outside time range`
                                 : ""}
                         </Text>
-                        <div className={cl("list")}>
-                            {visible.map(m => (
-                                <MentionRow
-                                    key={`${m.channel_id}-${m.id}`}
-                                    m={m}
-                                    userId={userId}
-                                    onJump={() => {
-                                        modalProps.onClose();
-                                        jumpTo(m);
-                                    }}
-                                />
-                            ))}
+                        <div className={cl("list-wrap")}>
+                            <ScrollerThin fade className={cl("list")}>
+                                {visible.map(m => (
+                                    <MentionRow
+                                        key={`${m.channel_id}-${m.id}`}
+                                        m={m}
+                                        userId={userId}
+                                        onJump={() => {
+                                            modalProps.onClose();
+                                            jumpTo(m);
+                                        }}
+                                    />
+                                ))}
+                            </ScrollerThin>
                         </div>
                     </>
                 )}

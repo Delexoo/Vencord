@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <AssemblyName>Vencord Plugins Installer</AssemblyName>
+    <RootNamespace>UpdateVencord</RootNamespace>
+    <Version>1.6.0</Version>
+    <Product>Vencord + Delexo Plugins</Product>
+    <Description>Installer for official Vencord with Delexo Plugins as addons.</Description>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+  </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="UpdateVencord.ps1" LogicalName="UpdateVencord.ps1" Condition="Exists('UpdateVencord.ps1')" />
+    <EmbeddedResource Include="..\UpdateVencord.ps1" LogicalName="UpdateVencord.ps1" Condition="!Exists('UpdateVencord.ps1') AND Exists('..\UpdateVencord.ps1')" />
+    <None Include="UpdateVencord.ps1" CopyToOutputDirectory="PreserveNewest" Condition="Exists('UpdateVencord.ps1')" />
+    <None Include="..\UpdateVencord.ps1" CopyToOutputDirectory="PreserveNewest" Link="UpdateVencord.ps1" Condition="!Exists('UpdateVencord.ps1') AND Exists('..\UpdateVencord.ps1')" />
+  </ItemGroup>
+</Project>

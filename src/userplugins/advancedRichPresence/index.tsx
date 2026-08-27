@@ -4,18 +4,31 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { Delexo } from "../_delexo/author";
 import { definePluginSettings } from "@api/Settings";
+import { getUserSettingLazy } from "@api/UserSettings";
+import { ErrorCard } from "@components/ErrorCard";
+import { ExpandableSection } from "@components/ExpandableCard";
+import { Flex } from "@components/Flex";
+import { Link } from "@components/Link";
 import { isTruthy } from "@utils/guards";
+import { Margins } from "@utils/margins";
+import { classes } from "@utils/misc";
+import { useAwaiter } from "@utils/react";
 import definePlugin, { OptionType } from "@utils/types";
 import { Activity } from "@vencord/discord-types";
 import { ActivityType } from "@vencord/discord-types/enums";
-import { ApplicationAssetUtils, FluxDispatcher } from "@webpack/common";
+import { findByCodeLazy, findComponentByCodeLazy } from "@webpack";
+import { ApplicationAssetUtils, Button, FluxDispatcher, Forms, UserStore } from "@webpack/common";
 
+import { Delexo } from "../_delexo/author";
 import { resolveTemplate, TimestampMode } from "./markdown";
 import { PresenceSettings } from "./Settings";
 import { loadPresetIntoStore, refreshPresets } from "./store";
 import managedStyle from "./style.css?managed";
+
+const useProfileThemeStyle = findByCodeLazy("profileThemeStyle:", "--profile-gradient-primary-color");
+const ActivityView = findComponentByCodeLazy(".party?(0", "USER_PROFILE_ACTIVITY");
+const ShowCurrentGame = getUserSettingLazy<boolean>("status", "showCurrentGame")!;
 
 const SOCKET_ID = "AdvancedRichPresence";
 
@@ -66,9 +79,9 @@ export const settings = definePluginSettings({
     activeName?: string;
 }>();
 
-async function createActivity(): Promise<Activity | undefined> {
+export async function createActivity(): Promise<Activity | undefined> {
     try {
-        const store = settings.store;
+        const { store } = settings;
         if (store.rpcEnabled === false) return;
 
         const {
@@ -113,7 +126,8 @@ async function createActivity(): Promise<Activity | undefined> {
 
         if (type === ActivityType.STREAMING) activity.url = streamLink;
 
-        switch (timestampMode ?? TimestampMode.TIME) {
+        const mode = timestampMode ?? TimestampMode.TIME;
+        switch (mode) {
             case TimestampMode.NOW:
                 activity.timestamps = { start: Date.now() };
                 break;
@@ -132,8 +146,12 @@ async function createActivity(): Promise<Activity | undefined> {
                 }
                 break;
             case TimestampMode.NONE:
-            default:
                 break;
+            default: {
+                const _exhaustive: never = mode;
+                void _exhaustive;
+                break;
+            }
         }
 
         if (detailsURL) activity.details_url = detailsURL;
@@ -206,10 +224,11 @@ export async function setRpc(disable?: boolean) {
 
 export default definePlugin({
     name: "AdvancedRichPresence",
-    description: "Custom Discord status with easy Markdown presets you can save and switch",
+    description: "CustomRPC with Markdown presets you can create, update, duplicate, and delete",
     tags: ["Activity", "Customisation"],
     searchTerms: ["rpc", "rich presence", "preset", "markdown", "harvard", "customrpc", "delexo"],
     authors: [Delexo],
+    dependencies: ["UserSettingsAPI"],
     requiresRestart: false,
     settings,
     managedStyle,
@@ -217,10 +236,10 @@ export default definePlugin({
     async start() {
         try {
             const list = await refreshPresets();
-            if (!settings.store.appName && list[0])
-                await loadPresetIntoStore(settings.store, list[0].fileName);
-            else if (settings.store.activeFile)
+            if (settings.store.activeFile)
                 await loadPresetIntoStore(settings.store, settings.store.activeFile);
+            else if (list[0] && !settings.store.appName)
+                await loadPresetIntoStore(settings.store, list[0].fileName);
         } catch (e) {
             console.error("[AdvancedRichPresence] preset load failed", e);
         }
@@ -239,5 +258,60 @@ export default definePlugin({
                 replace: "$& && false"
             }
         }
-    ]
+    ],
+
+    settingsAboutComponent: () => {
+        const [activity] = useAwaiter(createActivity, { fallbackValue: undefined, deps: Object.values(settings.store) });
+        const gameActivityEnabled = ShowCurrentGame.useSetting();
+        const { profileThemeStyle } = useProfileThemeStyle({});
+
+        return (
+            <>
+                {!gameActivityEnabled && (
+                    <ErrorCard
+                        className={classes(Margins.top16, Margins.bottom16)}
+                        style={{ padding: "1em" }}
+                    >
+                        <Forms.FormTitle>Notice</Forms.FormTitle>
+                        <Forms.FormText>Activity Sharing isn't enabled, people won't be able to see your custom rich presence!</Forms.FormText>
+
+                        <Button
+                            color={Button.Colors.TRANSPARENT}
+                            className={Margins.top8}
+                            onClick={() => ShowCurrentGame.updateSetting(true)}
+                        >
+                            Enable
+                        </Button>
+                    </ErrorCard>
+                )}
+
+                <div style={{ width: "284px", ...profileThemeStyle, marginTop: 8, borderRadius: 8, background: "var(--background-mod-muted)" }}>
+                    {activity && <ActivityView
+                        activity={activity}
+                        user={UserStore.getCurrentUser()}
+                        currentUser={UserStore.getCurrentUser()}
+                    />}
+                </div>
+
+                <ExpandableSection
+                    className={classes(Margins.top8, "vc-arp-fold")}
+                    renderContent={() => (
+                        <Flex flexDirection="column" gap="8px">
+                            <Forms.FormText>
+                                Create an app in the <Link href="https://discord.com/developers/applications">Developer Portal</Link> for an Application ID. Upload images there for asset keys, or use a direct <Link href="https://imgur.com">Imgur</Link> link (right-click → Copy image address).
+                            </Forms.FormText>
+                            <Forms.FormText>
+                                Presets are <code>.md</code> files in Documents → AdvancedRichPresence → presets. You cannot see your own buttons; others can. Fancy unicode fonts can hide the activity — use normal letters.
+                            </Forms.FormText>
+                            <Forms.FormText>
+                                Text lines accept {"{time}"}, {"{date}"}, and {"{preset}"}.
+                            </Forms.FormText>
+                        </Flex>
+                    )}
+                >
+                    Setup tips
+                </ExpandableSection>
+            </>
+        );
+    }
 });

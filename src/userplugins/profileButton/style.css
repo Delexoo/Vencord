@@ -1,0 +1,66 @@
+[class*="buttons"]:has(.vc-profile-button-host),
+[class*="buttonContainer"]:has(.vc-profile-button-host) {
+    display: flex !important;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: stretch;
+}
+
+.vc-profile-button-host {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: stretch;
+    align-self: stretch;
+    width: auto;
+    min-width: 0;
+    box-sizing: border-box;
+    padding: 0;
+}
+
+.vc-profile-button-wrap {
+    display: flex;
+    align-items: stretch;
+    width: auto;
+    height: 100%;
+}
+
+.vc-profile-button-btn,
+.vc-profile-button-btn[data-mana-component="button"] {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    width: auto !important;
+    height: 100% !important;
+    flex: none;
+    margin: 0 !important;
+    padding: 0 12px !important;
+    min-width: 0;
+    min-height: 0;
+    border: none !important;
+    border-radius: 8px !important;
+    background: #eb459e !important;
+    color: #fff !important;
+    font-weight: 600;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.vc-profile-button-btn:hover,
+.vc-profile-button-btn[data-mana-component="button"]:hover {
+    background: #f472b6 !important;
+    color: #fff !important;
+}
+
+.vc-profile-button-heart,
+.vc-profile-button-btn .vc-heart-icon {
+    width: 14px;
+    height: 14px;
+    flex: none;
+}
+
+.vc-profile-button-heart path,
+.vc-profile-button-btn .vc-heart-icon path {
+    fill: #fff;
+}

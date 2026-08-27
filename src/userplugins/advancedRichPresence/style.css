@@ -1,23 +1,30 @@
 .vc-arp-root {
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: 12px;
     box-sizing: border-box;
     width: 100%;
     max-width: 100%;
     margin: 4px 0 8px;
-    padding: 4px 0 8px;
+    padding: 0;
 }
 
 .vc-arp-section {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 10px;
     box-sizing: border-box;
-    padding: 16px;
+    padding: 12px;
     border-radius: 12px;
     background: var(--background-mod-subtle, rgba(255, 255, 255, 0.03));
     border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.06));
+}
+
+.vc-arp-section-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
 }
 
 .vc-arp-section-title {
@@ -43,6 +50,29 @@
     margin: 0;
     padding: 0;
     line-height: 1.35;
+}
+
+.vc-arp-pair {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    align-items: start;
+    gap: 0.5em;
+    width: 100%;
+}
+
+.vc-arp-single {
+    display: grid;
+    gap: 0.5em;
+}
+
+.vc-arp-single.vc-arp-disabled,
+.vc-arp-disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.vc-arp-error {
+    color: var(--text-feedback-critical, #f23f43);
 }
 
 .vc-arp-field {
@@ -89,9 +119,9 @@
 
 .vc-arp-switch-row {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     width: 100%;
-    padding: 2px 0;
+    padding: 0;
 }
 
 .vc-arp-switch-row .vc-form-switch-wrapper {
@@ -100,18 +130,17 @@
 }
 
 .vc-arp-switch-row .vc-form-switch {
-    gap: 16px;
-    align-items: flex-start;
+    gap: 12px;
+    align-items: center;
 }
 
 .vc-arp-switch-row .vc-form-switch-text {
-    gap: 8px;
-    padding: 2px 16px 2px 0;
+    gap: 0;
+    padding: 0 12px 0 0;
 }
 
 .vc-arp-switch-row .vc-form-switch-description {
-    margin: 0;
-    line-height: 1.45;
+    display: none;
 }
 
 .vc-arp-switch-row .vc-arp-switch {
@@ -119,19 +148,20 @@
     margin: 0;
 }
 
-.vc-arp-btn-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
+.vc-arp-btn-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
     width: 100%;
 }
 
-.vc-arp-btn-grid > *,
-.vc-arp-btn-grid button,
-.vc-arp-btn-grid [data-mana-component="button"] {
+.vc-arp-btn-row > *,
+.vc-arp-btn-row button,
+.vc-arp-btn-row [data-mana-component="button"] {
     box-sizing: border-box;
-    width: 100% !important;
+    flex: 1 1 0;
     min-width: 0 !important;
+    width: auto !important;
     max-width: none !important;
     margin: 0 !important;
     justify-content: center !important;
@@ -141,8 +171,8 @@
 .vc-arp-create {
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    padding: 14px;
+    gap: 8px;
+    padding: 10px;
     border-radius: 10px;
     background: rgba(88, 101, 242, 0.08);
     border: 1px solid rgba(88, 101, 242, 0.2);
@@ -183,9 +213,9 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 8px 20px;
-    margin: 4px 0 0;
-    padding: 14px 0 0;
+    gap: 4px 16px;
+    margin: 0;
+    padding: 8px 0 0;
     border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
 }
 
@@ -274,29 +304,37 @@
 
 .vc-arp-fold {
     margin: 0;
-    padding: 2px;
+    padding: 0;
     border-radius: 10px;
     background: rgba(0, 0, 0, 0.16);
     border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .vc-arp-fold .vc-expandable-card-header {
-    padding: 12px 14px;
+    padding: 8px 12px;
     margin: 0;
+    align-items: center;
 }
 
 .vc-arp-fold .vc-expandable-card-content {
-    padding: 4px 14px 16px;
+    padding: 0 12px 12px;
+}
+
+.vc-arp-fold-title {
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.3;
+    color: var(--header-primary, #f2f3f5);
 }
 
 .vc-arp-fold-body {
     display: flex;
     flex-direction: column;
-    gap: 16px;
-    margin-top: 4px;
-    padding: 4px 0;
+    gap: 10px;
+    margin: 0;
+    padding: 4px 0 0;
 }
 
 .vc-arp-fold + .vc-arp-fold {
-    margin-top: 8px;
+    margin-top: 0;
 }

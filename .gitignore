@@ -22,6 +22,10 @@ lerna-debug.log*
 .env
 .cursor/
 
+installer/bin/
+installer/obj/
+installer/publish/
+
 # Track Delexo plugins in this fork (upstream Vencord ignores them).
 # src/userplugins
 

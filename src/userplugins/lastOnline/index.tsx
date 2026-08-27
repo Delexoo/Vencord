@@ -16,7 +16,7 @@ import managedStyle from "./style.css?managed";
 const STORE_KEY = "LastOnlineTimestamps";
 const SEEN_KEY = "LastOnlineSeenOnline";
 
-type TipKind = "online" | "idle" | "dnd" | "last" | "unknown";
+type TipKind = "last" | "unknown";
 
 type TipInfo = {
     kind: TipKind;
@@ -24,11 +24,6 @@ type TipInfo = {
 };
 
 const settings = definePluginSettings({
-    showWhenActive: {
-        type: OptionType.BOOLEAN,
-        description: "Show Online / Idle / Do Not Disturb when the user is active",
-        default: true
-    },
     showInHeader: {
         type: OptionType.BOOLEAN,
         description: "Show status under the Direct Messages title in the chat header",
@@ -150,19 +145,7 @@ function tipForUser(userId: string | undefined | null): TipInfo | null {
     if (!userId) return null;
 
     const status = (PresenceStore.getStatus(userId) as string | undefined) || "offline";
-
-    if (status === "online") {
-        if (!settings.store.showWhenActive) return null;
-        return { kind: "online", text: "Online" };
-    }
-    if (status === "idle") {
-        if (!settings.store.showWhenActive) return null;
-        return { kind: "idle", text: "Idle" };
-    }
-    if (status === "dnd") {
-        if (!settings.store.showWhenActive) return null;
-        return { kind: "dnd", text: "Do Not Disturb" };
-    }
+    if (isActiveStatus(status)) return null;
 
     const ts = offlineAt[userId];
     if (ts != null) {
@@ -172,7 +155,7 @@ function tipForUser(userId: string | undefined | null): TipInfo | null {
         };
     }
 
-    return { kind: "unknown", text: "To be determined" };
+    return { kind: "unknown", text: "TBD..." };
 }
 
 function parseListItemChannelId(el: Element): string | null {
@@ -656,9 +639,9 @@ function teardownTipHost() {
 
 export default definePlugin({
     name: "Last Online",
-    description: "DM status under Direct Messages, sidebar hover, and full-profile display name",
+    description: "Shows how long a user has been offline in DMs, sidebar hover, and full profiles",
     tags: ["Friends", "Utility", "Appearance"],
-    searchTerms: ["last online", "offline", "idle", "dnd", "presence", "dm", "tooltip", "header", "profile"],
+    searchTerms: ["last online", "offline", "presence", "dm", "tooltip", "header", "profile", "tbd"],
     authors: [Delexo],
     settings,
     managedStyle,
@@ -699,11 +682,6 @@ export default definePlugin({
         offlineAt = (await DataStore.get<Record<string, number>>(STORE_KEY)) ?? {};
         const seen = (await DataStore.get<string[]>(SEEN_KEY)) ?? [];
         seenOnline = new Set(seen);
-
-        const store = settings.store as typeof settings.store & { hideWhenOnline?: boolean; };
-        if (store.hideWhenOnline != null && store.showWhenActive == null) {
-            store.showWhenActive = !store.hideWhenOnline;
-        }
 
         try {
             for (const id of PresenceStore.getUserIds?.() ?? []) {

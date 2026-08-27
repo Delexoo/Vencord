@@ -91,18 +91,6 @@
     height: 8px;
 }
 
-.vc-last-online-online .vc-last-online-dot {
-    background: var(--status-online, #23a55a);
-}
-
-.vc-last-online-idle .vc-last-online-dot {
-    background: var(--status-idle, #f0b232);
-}
-
-.vc-last-online-dnd .vc-last-online-dot {
-    background: var(--status-dnd, #f23f43);
-}
-
 .vc-last-online-last .vc-last-online-dot {
     background: #80848e;
 }
@@ -111,18 +99,6 @@
     background: transparent;
     border: 2px solid #80848e;
     box-sizing: border-box;
-}
-
-.vc-last-online-online.vc-last-online-header {
-    color: var(--status-online, #23a55a);
-}
-
-.vc-last-online-idle.vc-last-online-header {
-    color: var(--status-idle, #f0b232);
-}
-
-.vc-last-online-dnd.vc-last-online-header {
-    color: var(--status-dnd, #f23f43);
 }
 
 .vc-last-online-tooltip-arrow {

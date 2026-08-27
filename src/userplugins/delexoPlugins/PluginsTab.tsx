@@ -11,22 +11,26 @@ import { Card } from "@components/Card";
 import { Divider } from "@components/Divider";
 import ErrorBoundary from "@components/ErrorBoundary";
 import { HeadingTertiary } from "@components/Heading";
+import { Heart } from "@components/Heart";
 import { Paragraph } from "@components/Paragraph";
 import { SettingsTab, wrapTab } from "@components/settings/tabs/BaseTab";
 import { cl } from "@components/settings/tabs/plugins";
 import { PluginCard } from "@components/settings/tabs/plugins/PluginCard";
 import { UIElementsButton } from "@components/settings/tabs/plugins/UIElements";
 import { ChangeList } from "@utils/ChangeList";
+import { openUserProfile } from "@utils/discord";
 import { isTruthy } from "@utils/guards";
 import { Margins } from "@utils/margins";
 import { classes } from "@utils/misc";
 import { PluginTarget } from "@utils/pluginTargets";
 import { useAwaiter, useCleanupEffect } from "@utils/react";
 import { PluginTag, PluginTags } from "@utils/types";
-import { Button, ConfirmModal, lodash, openModal, Parser, React, SearchableSelect, Select, TextInput, Tooltip, useMemo, useRef, useState } from "@webpack/common";
+import { Button, Clickable, ConfirmModal, IconUtils, lodash, openModal, Parser, React, SearchableSelect, Select, TextInput, Tooltip, useEffect, useMemo, useRef, useState, UserStore, UserUtils, useStateFromStores } from "@webpack/common";
 import { JSX } from "react";
 
 import Plugins, { ExcludedPlugins, PluginMeta } from "~plugins";
+
+import { DELEXO_DISCORD_ID } from "../_delexo/author";
 
 const enum SearchStatus {
     ALL,
@@ -36,6 +40,33 @@ const enum SearchStatus {
     NEW,
     USER_PLUGINS,
     API_PLUGINS
+}
+
+const DELEXO_USER_ID = String(DELEXO_DISCORD_ID);
+const SUPPORT_URL = "https://buy.stripe.com/9B63cu3RE2ouaKgcHLcjS00";
+
+function DelexoNameLink() {
+    const user = useStateFromStores([UserStore], () => UserStore.getUser(DELEXO_USER_ID));
+
+    useEffect(() => {
+        if (!user) void UserUtils.getUser(DELEXO_USER_ID).catch(() => undefined);
+    }, [user]);
+
+    const avatar = user
+        ? user.getAvatarURL(void 0, 40, true)
+        : IconUtils.getDefaultAvatarURL(DELEXO_USER_ID);
+
+    return (
+        <Clickable
+            tag="span"
+            className="vc-delexo-plugins-author"
+            onClick={() => { void openUserProfile(DELEXO_USER_ID); }}
+            aria-label="Open Delexo's Discord profile"
+        >
+            <img className="vc-delexo-plugins-pfp" src={avatar} alt="" />
+            Delexo
+        </Clickable>
+    );
 }
 
 function ReloadRequiredCard({ required }: { required: boolean; }) {
@@ -334,10 +365,24 @@ function DelexoPluginsTab() {
 
             {delexoPlugins.length > 0 && (
                 <>
-                    <HeadingTertiary className={classes(Margins.top20, "vc-delexo-plugins-heading")}>Delexo Plugins</HeadingTertiary>
-                    <Paragraph className="vc-delexo-plugins-hint">
-                        Extended plugins for this Vencord build.
-                    </Paragraph>
+                    <div className="vc-delexo-plugins-head">
+                        <div className="vc-delexo-plugins-head-text">
+                            <HeadingTertiary className="vc-delexo-plugins-heading">
+                                <DelexoNameLink /> Plugins
+                            </HeadingTertiary>
+                            <Paragraph className="vc-delexo-plugins-hint">
+                                Extended plugins for this Vencord build.
+                            </Paragraph>
+                        </div>
+                        <Button
+                            className="vc-delexo-plugins-support"
+                            size={Button.Sizes.SMALL}
+                            onClick={() => VencordNative.native.openExternal(SUPPORT_URL)}
+                        >
+                            Support Delexo
+                            <Heart className="vc-delexo-plugins-heart" />
+                        </Button>
+                    </div>
                     <div className={cl("grid")}>
                         {delexoPlugins}
                     </div>

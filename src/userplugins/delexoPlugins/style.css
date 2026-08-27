@@ -1,5 +1,74 @@
+.vc-delexo-plugins-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 20px 0 0;
+}
+
+.vc-delexo-plugins-head-text {
+    min-width: 0;
+}
+
 .vc-delexo-plugins-heading {
+    margin: 0 !important;
     letter-spacing: 0.01em;
+}
+
+.vc-delexo-plugins-support,
+.vc-delexo-plugins-support[data-mana-component="button"] {
+    display: inline-flex !important;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+    margin: 0 !important;
+    padding: 6px 12px !important;
+    border: none !important;
+    border-radius: 8px !important;
+    background: #eb459e !important;
+    color: #fff !important;
+    font-weight: 600;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.vc-delexo-plugins-support:hover,
+.vc-delexo-plugins-support[data-mana-component="button"]:hover {
+    background: #f472b6 !important;
+    color: #fff !important;
+}
+
+.vc-delexo-plugins-heart,
+.vc-delexo-plugins-support .vc-heart-icon {
+    width: 14px;
+    height: 14px;
+}
+
+.vc-delexo-plugins-heart path,
+.vc-delexo-plugins-support .vc-heart-icon path {
+    fill: #fff;
+}
+
+.vc-delexo-plugins-author {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-right: 0.25em;
+    vertical-align: middle;
+    color: inherit;
+    cursor: pointer;
+    border-radius: 6px;
+}
+
+.vc-delexo-plugins-author:hover {
+    text-decoration: underline;
+}
+
+.vc-delexo-plugins-pfp {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    object-fit: cover;
 }
 
 .vc-delexo-plugins-hint {

@@ -13,6 +13,17 @@ import definePlugin, { OptionType, PluginNative } from "@utils/types";
 import { createRoot, SelectedChannelStore, Toasts, useEffect, useLayoutEffect, useRef, useState } from "@webpack/common";
 import type { Root } from "react-dom/client";
 
+import {
+    concatPcm,
+    encodePcmRecording,
+    encodeWav,
+    FORMAT_OPTIONS,
+    isPcmFormat,
+    isRecordFormat,
+    normalizeFormat,
+    recorderMimeFor,
+    type RecordFormat
+} from "./encode";
 import managedStyle from "./style.css?managed";
 
 const Native = VencordNative.pluginHelpers.AudioCapture as PluginNative<typeof import("./native")> | undefined;
@@ -44,10 +55,7 @@ const settings = definePluginSettings({
     recordFormat: {
         type: OptionType.SELECT,
         description: "Recording format",
-        options: [
-            { label: "WAV", value: "wav", default: true },
-            { label: "WebM (smaller)", value: "webm" }
-        ]
+        options: FORMAT_OPTIONS
     },
     lastFilePath: {
         type: OptionType.STRING,
@@ -79,12 +87,13 @@ let recordStartedAt: number | null = null;
 let resolvedRecordDir = "";
 
 let mediaRecorder: MediaRecorder | null = null;
+let recorderMime = "audio/webm";
 let activeStreams: MediaStream[] = [];
 let audioCtx: AudioContext | null = null;
 let recordedChunks: BlobPart[] = [];
 let pcmChunks: Float32Array[] = [];
 let pcmSampleRate = 48000;
-let usingPcm = false;
+let activeFormat: RecordFormat = "wav";
 let processorNode: ScriptProcessorNode | null = null;
 
 function inVoiceNow() {
@@ -211,41 +220,6 @@ async function getSystemAudioStream() {
         : new Error("System/Discord audio not available on this device");
 }
 
-function encodeWav(chunks: Float32Array[], sampleRate: number): ArrayBuffer {
-    let length = 0;
-    for (const c of chunks) length += c.length;
-    const samples = new Float32Array(length);
-    let offset = 0;
-    for (const c of chunks) {
-        samples.set(c, offset);
-        offset += c.length;
-    }
-    const buffer = new ArrayBuffer(44 + samples.length * 2);
-    const view = new DataView(buffer);
-    const writeStr = (o: number, s: string) => {
-        for (let i = 0; i < s.length; i++) view.setUint8(o + i, s.charCodeAt(i));
-    };
-    writeStr(0, "RIFF");
-    view.setUint32(4, 36 + samples.length * 2, true);
-    writeStr(8, "WAVE");
-    writeStr(12, "fmt ");
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true);
-    view.setUint16(22, 1, true);
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate * 2, true);
-    view.setUint16(32, 2, true);
-    view.setUint16(34, 16, true);
-    writeStr(36, "data");
-    view.setUint32(40, samples.length * 2, true);
-    let idx = 44;
-    for (let i = 0; i < samples.length; i++, idx += 2) {
-        const s = Math.max(-1, Math.min(1, samples[i]));
-        view.setInt16(idx, s < 0 ? s * 0x8000 : s * 0x7fff, true);
-    }
-    return buffer;
-}
-
 async function blobToBase64(blob: Blob) {
     const buf = await blob.arrayBuffer();
     const bytes = new Uint8Array(buf);
@@ -254,6 +228,14 @@ async function blobToBase64(blob: Blob) {
     for (let i = 0; i < bytes.length; i += chunk) {
         binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
     }
+    return btoa(binary);
+}
+
+function uint8ToBase64(bytes: Uint8Array) {
+    let binary = "";
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk)
+        binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
     return btoa(binary);
 }
 
@@ -285,7 +267,7 @@ async function startCapture() {
         stopTracks();
         recordedChunks = [];
         pcmChunks = [];
-        usingPcm = (settings.store.recordFormat || "wav") === "wav";
+        activeFormat = normalizeFormat(settings.store.recordFormat);
 
         const mode = captureMode();
         const streams: MediaStream[] = [];
@@ -310,7 +292,7 @@ async function startCapture() {
 
         audioCtx = new AudioContext();
 
-        if (usingPcm) {
+        if (isPcmFormat(activeFormat)) {
             // MediaStreamDestination has 0 Web Audio outputs - mix via GainNode instead.
             const mixer = audioCtx.createGain();
             for (const s of streams) {
@@ -338,9 +320,10 @@ async function startCapture() {
             audioCtx.createMediaStreamSource(s).connect(dest);
         }
 
-        const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-            ? "audio/webm;codecs=opus"
-            : "audio/webm";
+        const recorderFormat = activeFormat === "m4a" ? "m4a" : "webm";
+        const mime = recorderMimeFor(recorderFormat);
+        if (!mime) throw new Error(`This Discord build can't record ${recorderFormat.toUpperCase()}`);
+        recorderMime = mime;
         mediaRecorder = new MediaRecorder(dest.stream, { mimeType: mime });
         mediaRecorder.ondataavailable = e => {
             if (e.data.size > 0) recordedChunks.push(e.data);
@@ -373,21 +356,30 @@ async function stopCapture() {
 
     const dir = resolvedRecordDir || (await resolveRecordDir());
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const ext = usingPcm ? "wav" : "webm";
-    const fileName = `discord-capture-${stamp}.${ext}`;
+    const format = activeFormat;
 
     try {
-        if (usingPcm) {
-            const wav = encodeWav(pcmChunks, pcmSampleRate);
+        if (isPcmFormat(format)) {
+            let ext = format;
+            let bytes: Uint8Array;
+            try {
+                const encoded = await encodePcmRecording(format, pcmChunks, pcmSampleRate);
+                bytes = encoded.bytes;
+                ext = encoded.ext;
+            } catch (e) {
+                log.error("encode failed, saving WAV", e);
+                bytes = encodeWav(concatPcm(pcmChunks), pcmSampleRate);
+                ext = "wav";
+                Toasts.show({
+                    message: `Couldn't encode ${format.toUpperCase()} — saved WAV instead.`,
+                    id: Toasts.genId(),
+                    type: Toasts.Type.MESSAGE
+                });
+            }
             pcmChunks = [];
-            const bytes = new Uint8Array(wav);
-            let binary = "";
-            const chunk = 0x8000;
-            for (let i = 0; i < bytes.length; i += chunk)
-                binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-            const b64 = btoa(binary);
-            if (Native) {
-                const res = await Native.writeRecording(dir, fileName, b64);
+            if (bytes.length && Native) {
+                const b64 = uint8ToBase64(bytes);
+                const res = await Native.writeRecording(dir, `discord-capture-${stamp}.${ext}`, b64);
                 if (res.ok) {
                     lastFile = res.data;
                     settings.store.lastFilePath = res.data;
@@ -400,11 +392,12 @@ async function stopCapture() {
                 rec.onstop = () => resolve();
                 try { rec.stop(); } catch { resolve(); }
             });
-            const blob = new Blob(recordedChunks, { type: "audio/webm" });
+            const ext = format === "m4a" ? "m4a" : "webm";
+            const blob = new Blob(recordedChunks, { type: recorderMime });
             recordedChunks = [];
             if (blob.size > 0 && Native) {
                 const b64 = await blobToBase64(blob);
-                const res = await Native.writeRecording(dir, fileName, b64);
+                const res = await Native.writeRecording(dir, `discord-capture-${stamp}.${ext}`, b64);
                 if (res.ok) {
                     lastFile = res.data;
                     settings.store.lastFilePath = res.data;
@@ -629,14 +622,11 @@ function CapturePanel({ anchor }: { anchor: DOMRect | null; }) {
                     <NiceSelect
                         label="File type"
                         value={fmt}
-                        options={[
-                            { value: "wav", label: "WAV" },
-                            { value: "webm", label: "WebM" },
-                        ]}
+                        options={FORMAT_OPTIONS.map(opt => ({ value: opt.value, label: opt.label }))}
                         onChange={nextRaw => {
-                            const next = nextRaw === "webm" ? "webm" : "wav";
-                            settings.store.recordFormat = next;
-                            setFmt(next);
+                            if (!isRecordFormat(nextRaw)) return;
+                            settings.store.recordFormat = nextRaw;
+                            setFmt(nextRaw);
                         }}
                     />
 
@@ -908,7 +898,7 @@ export default definePlugin({
     name: "AudioCapture",
     description: "Record mic and/or Discord voice audio next to Open Soundboard. Standalone, no external engine.",
     tags: ["Voice", "Utility"],
-    searchTerms: ["record", "capture", "audio", "voice", "soundboard", "wav"],
+    searchTerms: ["record", "capture", "audio", "voice", "soundboard", "wav", "mp3", "ogg", "flac"],
     authors: [Delexo],
     settings,
     managedStyle,

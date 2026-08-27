@@ -26,6 +26,7 @@ export type StoreShape = PresenceFields & {
     rpcEnabled?: boolean;
     activeFile?: string;
     activeName?: string;
+    notes?: string;
 };
 
 let cache: PresencePreset[] = [];
@@ -106,9 +107,11 @@ export async function createNewPreset(store: StoreShape, name: string) {
         name: display,
         fileName: uniqueFileName(display),
         updatedAt: Date.now(),
-        appName: display,
-        type: ActivityType.PLAYING,
-        timestampMode: TimestampMode.TIME,
+        notes: store.notes,
+        ...snapshotFields(store),
+        appName: store.appName?.trim() || display,
+        type: store.type ?? ActivityType.PLAYING,
+        timestampMode: store.timestampMode ?? TimestampMode.TIME,
     });
 }
 
@@ -162,11 +165,14 @@ export async function deletePresetFile(store: StoreShape, fileName: string) {
     if (!Native) throw new Error("Desktop Discord required");
     const res = await Native.deletePresetFile(fileName);
     if (!res.ok) throw new Error(res.data);
+    const remaining = (await refreshPresets()).filter(p => p.fileName !== fileName);
     if (store.activeFile === fileName) {
-        store.activeFile = undefined;
-        store.activeName = undefined;
+        if (remaining[0]) await loadPresetIntoStore(store, remaining[0].fileName);
+        else {
+            store.activeFile = undefined;
+            store.activeName = undefined;
+        }
     }
-    await refreshPresets();
 }
 
 export async function renamePreset(store: StoreShape, fileName: string, newName: string) {
