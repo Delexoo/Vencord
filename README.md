@@ -1,3 +1,15 @@
+## Download
+
+One click. Run the installer. Official Vencord plus Delexo Plugins.
+
+<p align="center">
+  <a href="https://github.com/Delexoo/Vencord/releases/latest/download/Vencord-Plugins-Installer.exe">
+    <img src="assets/download-installer.svg" alt="Download Installer" width="280" height="48" />
+  </a>
+</p>
+
+Windows only. After it finishes, restart Discord.
+
 # Vencord
 
 ![](https://img.shields.io/github/package-json/v/Vendicated/Vencord?style=for-the-badge&logo=github&logoColor=d3869b&label=&color=1d2021&labelColor=282828)
@@ -22,7 +34,9 @@ The cutest Discord client mod
 
 ## Installing / Uninstalling
 
-Visit https://vencord.dev/download
+Use the [Download](#download) button above, or open [DOWNLOAD.md](DOWNLOAD.md).
+
+To remove Vencord later, run the installer again and choose uninstall if prompted.
 
 ## Join our Support/Community Server
 

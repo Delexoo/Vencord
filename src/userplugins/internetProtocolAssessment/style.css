@@ -1,0 +1,255 @@
+#vc-ipa-host {
+    position: fixed;
+    inset: 0;
+    z-index: 100050;
+    pointer-events: none;
+}
+
+.vc-ipa-root {
+    position: fixed;
+    z-index: 100051;
+    width: 340px;
+    height: 460px;
+    min-width: 280px;
+    min-height: 120px;
+    max-width: calc(100vw - 16px);
+    max-height: calc(100vh - 16px);
+    pointer-events: auto;
+    font-family: var(--font-primary, "gg sans", "Segoe UI", sans-serif);
+    color: var(--text-default, #dbdee1);
+}
+
+.vc-ipa-root.is-min {
+    width: 340px;
+    height: auto;
+    min-height: 0;
+}
+
+.vc-ipa-root.is-max {
+    width: calc(100vw - 24px) !important;
+    height: calc(100vh - 24px) !important;
+}
+
+.vc-ipa-root.is-dragging {
+    cursor: grabbing;
+}
+
+.vc-ipa-card {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    border-radius: 14px;
+    background: rgba(18, 19, 22, 0.82);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.42);
+    backdrop-filter: blur(16px) saturate(1.1);
+    -webkit-backdrop-filter: blur(16px) saturate(1.1);
+    overflow: hidden;
+}
+
+.vc-ipa-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 12px;
+    flex: 0 0 auto;
+    cursor: grab;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.vc-ipa-root.is-dragging .vc-ipa-bar {
+    cursor: grabbing;
+}
+
+.vc-ipa-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.vc-ipa-mark {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex: 0 0 auto;
+    background: #80848e;
+    box-shadow: 0 0 0 3px rgba(128, 132, 142, 0.16);
+}
+
+.vc-ipa-root.is-live .vc-ipa-mark {
+    background: var(--status-online, #23a55a);
+    box-shadow: 0 0 0 3px rgba(35, 165, 90, 0.2);
+}
+
+.vc-ipa-root.is-reconnect .vc-ipa-mark {
+    background: var(--status-idle, #f0b232);
+    box-shadow: 0 0 0 3px rgba(240, 178, 50, 0.22);
+}
+
+.vc-ipa-titles {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+}
+
+.vc-ipa-title {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.vc-ipa-sub {
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--text-muted, #949ba4);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.vc-ipa-actions {
+    display: flex;
+    gap: 4px;
+    flex: 0 0 auto;
+}
+
+.vc-ipa-btn {
+    appearance: none;
+    width: 28px;
+    height: 28px;
+    border: 0;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-default, #dbdee1);
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.vc-ipa-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.12);
+}
+
+.vc-ipa-btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+.vc-ipa-btn-close:hover:not(:disabled) {
+    background: rgba(242, 63, 67, 0.28);
+    color: #fff;
+}
+
+.vc-ipa-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+
+.vc-ipa-badge {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    padding: 3px 7px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-muted, #949ba4);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.vc-ipa-badge.is-on {
+    background: rgba(88, 101, 242, 0.22);
+    color: #e8eaff;
+    border-color: rgba(88, 101, 242, 0.35);
+}
+
+.vc-ipa-spark {
+    display: block;
+    width: 100%;
+    height: 44px;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.2);
+}
+
+.vc-ipa-spark-empty {
+    display: grid;
+    place-items: center;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-muted, #949ba4);
+}
+
+.vc-ipa-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.vc-ipa-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: rgba(0, 0, 0, 0.22);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.vc-ipa-heading {
+    margin: 0;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted, #949ba4);
+}
+
+.vc-ipa-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.vc-ipa-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 22px;
+}
+
+.vc-ipa-label {
+    font-size: 12px;
+    font-weight: 550;
+    color: var(--header-secondary, #b5bac1);
+}
+
+.vc-ipa-value {
+    font-size: 12px;
+    font-weight: 650;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-default, #dbdee1);
+    text-align: right;
+    max-width: 58%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.vc-ipa-bone {
+    color: var(--text-muted, #949ba4);
+    letter-spacing: 0.12em;
+}

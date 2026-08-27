@@ -1,0 +1,170 @@
+.vc-advanced-note-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    margin: 4px 0 8px;
+}
+
+.vc-advanced-note-btn {
+    width: auto !important;
+    min-width: 140px;
+}
+
+.vc-advanced-note-btn-hint {
+    color: var(--text-muted, #949ba4);
+    margin: 0;
+    line-height: 1.3;
+}
+
+.vc-advanced-note-popout-host {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0 16px 12px;
+    margin-top: -4px;
+}
+
+.vc-advanced-note-popout-host .vc-advanced-note-profile-actions {
+    margin: 0;
+}
+
+.vc-advanced-note-profile-host {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.vc-advanced-note-profile-host .vc-advanced-note-profile-actions {
+    margin: 0;
+    padding: 0;
+}
+
+.vc-advanced-note-profile-actions {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    margin: 8px 0 0;
+    box-sizing: border-box;
+}
+
+.vc-advanced-note-profile-actions-sidebar {
+    padding: 0 16px 12px;
+}
+
+.vc-advanced-note-profile-btn {
+    width: 100% !important;
+    justify-content: center;
+}
+
+/* Legacy field styles kept for safety if an old build flashes */
+.vc-advanced-note-field {
+    display: none;
+}
+
+.vc-advanced-note-modal-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 0;
+    flex: 1;
+}
+
+.vc-advanced-note-textarea {
+    width: 100%;
+    min-height: 320px;
+    max-height: min(70vh, 640px);
+    resize: vertical;
+    box-sizing: border-box;
+    font-family: var(--font-code, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+    font-size: 14px;
+    line-height: 1.5;
+    padding: 12px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--border-subtle, var(--background-modifier-accent));
+    background: var(--input-background, var(--background-tertiary));
+    color: var(--text-default, var(--text-normal));
+    outline: none;
+}
+
+.vc-advanced-note-textarea:focus {
+    border-color: var(--brand-500, var(--brand-experiment));
+}
+
+.vc-advanced-note-status {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.vc-advanced-note-status .ok {
+    color: var(--text-positive, #23a55a);
+}
+
+.vc-advanced-note-status .err {
+    color: var(--text-danger, #f23f43);
+}
+
+.vc-advanced-note-settings {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 8px;
+    max-width: 520px;
+}
+
+.vc-advanced-note-hint {
+    color: var(--text-muted, #949ba4);
+    margin: 0;
+    line-height: 1.4;
+}
+
+.vc-advanced-note-hint code {
+    font-size: 12px;
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.25);
+}
+
+.vc-advanced-note-path-box {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.22);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.vc-advanced-note-path {
+    font-size: 12px;
+    line-height: 1.4;
+    word-break: break-all;
+    color: var(--text-default, #dbdee1);
+    font-family: var(--font-code, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+}
+
+.vc-advanced-note-meta-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.vc-advanced-note-meta {
+    color: var(--text-muted, #949ba4);
+}
+
+.vc-advanced-note-meta-row button,
+.vc-advanced-note-meta-row [role="button"] {
+    width: auto !important;
+    flex: 0 0 auto;
+    margin: 0 !important;
+}
