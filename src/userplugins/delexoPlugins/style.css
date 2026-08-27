@@ -1,0 +1,12 @@
+.vc-delexo-plugins-heading {
+    letter-spacing: 0.01em;
+}
+
+.vc-delexo-plugins-hint {
+    margin: 4px 0 0;
+    color: var(--text-muted, #b5bac1);
+}
+
+.vc-delexo-plugins-stock-heading {
+    margin-top: 28px;
+}
