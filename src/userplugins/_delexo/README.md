@@ -5,3 +5,4 @@
 - Avatar hash: 088ed100d79029c863acab300f70836f
 - discord-pfp.png — current Discord avatar
 - discord-profile.png — contributor modal screenshot reference
+- Support Delexo: https://buy.stripe.com/9B63cu3RE2ouaKgcHLcjS00

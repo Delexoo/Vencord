@@ -10,6 +10,12 @@ One click. Run the installer. Official Vencord plus Delexo Plugins.
 
 Windows only. After it finishes, restart Discord.
 
+## Support Delexo
+
+If you want to support Delexo individually (the Delexo Plugins layer), you can do that here:
+
+**[Support Delexo](https://buy.stripe.com/9B63cu3RE2ouaKgcHLcjS00)**
+
 # Vencord
 
 ![](https://img.shields.io/github/package-json/v/Vendicated/Vencord?style=for-the-badge&logo=github&logoColor=d3869b&label=&color=1d2021&labelColor=282828)
