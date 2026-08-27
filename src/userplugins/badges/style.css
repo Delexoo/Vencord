@@ -1,0 +1,63 @@
+.vc-delexo-badges-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 4px;
+}
+
+.vc-delexo-badges-hint {
+    color: var(--text-muted, #b5bac1);
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+.vc-delexo-badges-live {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 28px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: var(--background-secondary, #2b2d31);
+}
+
+.vc-delexo-badges-live img {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+}
+
+.vc-delexo-badges-empty {
+    color: var(--text-muted, #b5bac1);
+    font-size: 13px;
+}
+
+.vc-delexo-badges-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 4px 4px;
+}
+
+.vc-delexo-badges-row .vc-form-switch-wrapper {
+    flex: 1;
+    margin-bottom: 0;
+}
+
+.vc-delexo-badges-row .vc-form-switch-border {
+    display: none;
+}
+
+.vc-delexo-badges-icon {
+    width: 28px;
+    height: 28px;
+    flex: none;
+    border-radius: 50%;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
+.vc-delexo-badges-split {
+    height: 1px;
+    margin: 4px 0;
+    background: var(--background-modifier-accent, rgba(255, 255, 255, 0.08));
+}
