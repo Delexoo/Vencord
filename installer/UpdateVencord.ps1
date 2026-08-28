@@ -308,6 +308,8 @@ try {
             if (Test-Path -LiteralPath $mirror) { Remove-Item -LiteralPath $mirror -Recurse -Force }
             Copy-Item -LiteralPath $from -Destination $to -Recurse -Force
             Copy-Item -LiteralPath $from -Destination $mirror -Recurse -Force
+            Get-ChildItem -LiteralPath $to, $mirror -Recurse -Directory -Filter "__pycache__" -ErrorAction SilentlyContinue |
+                Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
             Write-Log "Overlayed plugin $name"
             $overlayed++
         }
@@ -343,9 +345,14 @@ try {
         New-Item -ItemType Directory -Force -Path $AppDataDist | Out-Null
         $distDir = Join-Path $VencordDir "dist"
         foreach ($f in @(
+                "package.json",
                 "renderer.js", "renderer.css", "renderer.js.map", "renderer.css.map", "renderer.js.LEGAL.txt",
                 "preload.js", "preload.js.map",
-                "patcher.js", "patcher.js.map", "patcher.js.LEGAL.txt"
+                "patcher.js", "patcher.js.map", "patcher.js.LEGAL.txt",
+                "vencordDesktopMain.js", "vencordDesktopMain.js.map", "vencordDesktopMain.js.LEGAL.txt",
+                "vencordDesktopPreload.js", "vencordDesktopPreload.js.map",
+                "vencordDesktopRenderer.js", "vencordDesktopRenderer.js.map", "vencordDesktopRenderer.css",
+                "vencordDesktopRenderer.js.LEGAL.txt"
             )) {
             $src = Join-Path $distDir $f
             if (Test-Path $src) {

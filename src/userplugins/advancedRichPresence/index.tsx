@@ -1,32 +1,23 @@
-/*
+﻿/*
  * Vencord, a Discord client mod
  * Copyright (c) 2026 Delexo contributors
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
 import { definePluginSettings } from "@api/Settings";
-import { getUserSettingLazy } from "@api/UserSettings";
-import { ErrorCard } from "@components/ErrorCard";
 import { Link } from "@components/Link";
 import { isTruthy } from "@utils/guards";
-import { Margins } from "@utils/margins";
 import { classes } from "@utils/misc";
-import { useAwaiter } from "@utils/react";
 import definePlugin, { OptionType } from "@utils/types";
 import { Activity } from "@vencord/discord-types";
 import { ActivityType } from "@vencord/discord-types/enums";
-import { findByCodeLazy, findComponentByCodeLazy } from "@webpack";
-import { ApplicationAssetUtils, Button, Clickable, FluxDispatcher, Forms, UserStore, useState } from "@webpack/common";
+import { ApplicationAssetUtils, Clickable, FluxDispatcher, Forms, ReactDOM, useLayoutEffect, UserStore, useState } from "@webpack/common";
 
 import { Delexo } from "../_delexo/author";
 import { resolveTemplate, TimestampMode } from "./markdown";
 import { PresenceSettings } from "./Settings";
 import { loadPresetIntoStore, refreshPresets } from "./store";
 import managedStyle from "./style.css?managed";
-
-const useProfileThemeStyle = findByCodeLazy("profileThemeStyle:", "--profile-gradient-primary-color");
-const ActivityView = findComponentByCodeLazy(".party?(0", "USER_PROFILE_ACTIVITY");
-const ShowCurrentGame = getUserSettingLazy<boolean>("status", "showCurrentGame")!;
 
 const SOCKET_ID = "AdvancedRichPresence";
 
@@ -224,26 +215,44 @@ export async function setRpc(disable?: boolean) {
 
 function SetupTips() {
     const [open, setOpen] = useState(false);
-    return (
-        <div className="vc-arp-tips">
-            <Clickable className="vc-arp-tips-toggle" onClick={() => setOpen(v => !v)}>
-                <span>Setup tips</span>
-                <span className="vc-arp-tips-caret" aria-hidden>{open ? "▾" : "▸"}</span>
-            </Clickable>
-            {open && (
-                <div className="vc-arp-tips-body">
-                    <Forms.FormText>
-                        Optional <Link href="https://discord.com/developers/applications">App ID</Link> from the Developer Portal if you upload images there. Otherwise paste a direct <Link href="https://imgur.com">Imgur</Link> image address.
-                    </Forms.FormText>
-                    <Forms.FormText>
-                        Statuses are saved as files in Documents → AdvancedRichPresence. You won’t see your own buttons; other people will.
-                    </Forms.FormText>
-                    <Forms.FormText>
-                        In Line 1 or Line 2 you can type {"{user}"} (your name), {"{time}"}, {"{date}"}, or {"{preset}"}.
-                    </Forms.FormText>
-                </div>
-            )}
+    const [tagRow, setTagRow] = useState<HTMLElement | null>(null);
+    const [infoWrap, setInfoWrap] = useState<HTMLElement | null>(null);
+
+    useLayoutEffect(() => {
+        const tags = document.querySelector<HTMLElement>(".vc-plugin-modal-tags");
+        setTagRow(tags);
+        setInfoWrap(tags?.parentElement ?? null);
+    }, []);
+
+    const pill = (
+        <Clickable
+            className={classes("vc-arp-tips-toggle", tagRow && "vc-plugin-modal-tag", open && "vc-arp-tips-on")}
+            onClick={() => setOpen(v => !v)}
+        >
+            <span>Setup tips</span>
+            <span className="vc-arp-tips-caret" aria-hidden>{open ? "▾" : "▸"}</span>
+        </Clickable>
+    );
+
+    const body = open && (
+        <div className="vc-arp-tips-body">
+            <Forms.FormText>
+                Optional <Link href="https://discord.com/developers/applications">App ID</Link> from the Developer Portal if you upload images there. Otherwise paste a direct <Link href="https://imgur.com">Imgur</Link> image address.
+            </Forms.FormText>
+            <Forms.FormText>
+                Statuses are saved as files in Documents → AdvancedRichPresence. You won’t see your own buttons; other people will.
+            </Forms.FormText>
+            <Forms.FormText>
+                In Line 1 or Line 2 you can type {"{user}"} (your name), {"{time}"}, {"{date}"}, or {"{preset}"}.
+            </Forms.FormText>
         </div>
+    );
+
+    return (
+        <>
+            {tagRow ? ReactDOM.createPortal(pill, tagRow) : <div className="vc-arp-tips">{pill}</div>}
+            {body && (infoWrap ? ReactDOM.createPortal(body, infoWrap) : body)}
+        </>
     );
 }
 
@@ -287,43 +296,10 @@ export default definePlugin({
         }
     ],
 
-    settingsAboutComponent: () => {
-        const [activity] = useAwaiter(createActivity, { fallbackValue: undefined, deps: Object.values(settings.store) });
-        const gameActivityEnabled = ShowCurrentGame.useSetting();
-        const { profileThemeStyle } = useProfileThemeStyle({});
-
-        return (
-            <>
-                {!gameActivityEnabled && (
-                    <ErrorCard
-                        className={classes(Margins.top16, Margins.bottom16)}
-                        style={{ padding: "0.75em 1em" }}
-                    >
-                        <Forms.FormTitle>Activity sharing is off</Forms.FormTitle>
-                        <Forms.FormText>Turn it on so friends can see this status on your profile.</Forms.FormText>
-                        <Button
-                            color={Button.Colors.BRAND}
-                            size={Button.Sizes.SMALL}
-                            className={Margins.top8}
-                            onClick={() => ShowCurrentGame.updateSetting(true)}
-                        >
-                            Turn on
-                        </Button>
-                    </ErrorCard>
-                )}
-
-                {activity && (
-                    <div className="vc-arp-live-preview" style={{ ...profileThemeStyle }}>
-                        <ActivityView
-                            activity={activity}
-                            user={UserStore.getCurrentUser()}
-                            currentUser={UserStore.getCurrentUser()}
-                        />
-                    </div>
-                )}
-
-                <SetupTips />
-            </>
-        );
-    }
+    settingsAboutComponent: () => (
+        <>
+            <div className="vc-arp-about-anchor" hidden />
+            <SetupTips />
+        </>
+    )
 });

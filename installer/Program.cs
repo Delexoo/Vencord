@@ -200,7 +200,7 @@ sealed class InstallerForm : Form
 
         _eyebrow = new Label
         {
-            Text = "INSTALLER",
+            Text = $"INSTALLER v{Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.8.0"}",
             AutoSize = true,
             Font = new Font("Segoe UI", 7.5f, FontStyle.Bold),
             ForeColor = Accent,

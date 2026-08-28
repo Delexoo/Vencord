@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Internet Protocol Assessment — advanced preview</title>
+<style>
+:root {
+    --font-primary: "gg sans", "Segoe UI", system-ui, sans-serif;
+    --text-normal: #dbdee1;
+    --text-muted: #949ba4;
+    --background-primary: #1e1f22;
+    --background-secondary: #2b2d31;
+    --background-tertiary: #232428;
+    --background-floating: #111214;
+    --background-modifier-accent: rgba(255, 255, 255, 0.08);
+    --background-modifier-hover: rgba(255, 255, 255, 0.06);
+    --background-modifier-active: rgba(255, 255, 255, 0.12);
+    --interactive-normal: #dbdee1;
+    --interactive-active: #fff;
+    --status-positive: #23a55a;
+    --status-warning: #f0b232;
+    --status-danger: #f23f43;
+    --elevation-high: 0 16px 40px rgba(0, 0, 0, 0.42);
+}
+html, body {
+    margin: 0;
+    min-height: 100%;
+    background: #111214;
+    color: var(--text-normal);
+    font-family: var(--font-primary);
+}
+body {
+    background:
+        linear-gradient(180deg, #1a1b1e 0%, #111214 220px),
+        #111214;
+}
+.preview-chrome {
+    padding: 18px 22px 8px;
+    color: #949ba4;
+    font-size: 12px;
+}
+.preview-chrome strong { color: #dbdee1; }
+.fake-discord {
+    position: relative;
+    min-height: calc(100vh - 56px);
+    background:
+        radial-gradient(1200px 400px at 20% 0%, #2b2d31 0%, transparent 60%),
+        #313338;
+    padding: 24px;
+}
+
+.vc-ipa-root {
+    position: relative;
+    z-index: 1;
+    width: min(1180px, calc(100vw - 48px));
+    max-height: calc(100vh - 96px);
+    font-family: var(--font-primary);
+    color: var(--text-normal);
+    margin: 0 auto;
+}
+.vc-ipa-card {
+    overflow: hidden;
+    border: 1px solid var(--background-modifier-accent);
+    border-radius: 14px;
+    background: rgba(30, 31, 34, 0.96);
+    box-shadow: var(--elevation-high);
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100vh - 96px);
+}
+.vc-ipa-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    min-height: 58px;
+    padding: 10px 12px 10px 16px;
+    background: var(--background-secondary);
+    border-bottom: 1px solid var(--background-modifier-accent);
+    user-select: none;
+    flex: 0 0 auto;
+}
+.vc-ipa-title-wrap, .vc-ipa-actions, .vc-ipa-section-head, .vc-ipa-badges, .vc-ipa-flow-protocol {
+    display: flex;
+    align-items: center;
+}
+.vc-ipa-title-wrap { gap: 10px; min-width: 0; }
+.vc-ipa-actions { gap: 6px; flex: none; }
+.vc-ipa-titles { display: flex; flex-direction: column; min-width: 0; }
+.vc-ipa-title { font-size: 15px; font-weight: 700; }
+.vc-ipa-sub { font-size: 11px; color: var(--text-muted); }
+.vc-ipa-mark { width: 9px; height: 9px; border-radius: 50%; background: var(--status-positive); flex: none; }
+.vc-ipa-btn {
+    width: 34px;
+    height: 34px;
+    border: 0;
+    border-radius: 8px;
+    color: var(--interactive-normal);
+    background: var(--background-modifier-hover);
+    cursor: default;
+    font-weight: 700;
+}
+.vc-ipa-btn-start {
+    width: auto;
+    padding: 0 12px;
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    background: rgba(242, 63, 67, 0.22);
+    color: #ffd0d2;
+}
+.vc-ipa-body {
+    overflow: auto;
+    padding: 12px;
+    max-height: calc(100vh - 160px);
+}
+.vc-ipa-tech-body { display: grid; gap: 12px; }
+.vc-ipa-top-grid, .vc-ipa-bottom-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, .85fr);
+    gap: 12px;
+}
+.vc-ipa-panel {
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid var(--background-modifier-accent);
+    border-radius: 10px;
+    background: var(--background-secondary);
+}
+.vc-ipa-section-head { justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.vc-ipa-heading { margin: 2px 0 0; font-size: 15px; line-height: 1.2; }
+.vc-ipa-eyebrow {
+    display: block;
+    color: var(--text-muted);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: .1em;
+}
+.vc-ipa-status-pill, .vc-ipa-count-pill, .vc-ipa-proto, .vc-ipa-event-kind {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--background-modifier-accent);
+    border-radius: 999px;
+    background: var(--background-tertiary);
+    font-size: 10px;
+    font-weight: 800;
+    white-space: nowrap;
+}
+.vc-ipa-status-pill { padding: 5px 8px; color: var(--text-muted); }
+.vc-ipa-status-pill.is-ok { color: var(--status-positive); }
+.vc-ipa-count-pill { min-width: 26px; padding: 4px 8px; }
+.vc-ipa-kpis, .vc-ipa-forensic-kpis {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 7px;
+    margin: 10px 0;
+}
+.vc-ipa-kpi {
+    min-width: 0;
+    padding: 8px;
+    border: 1px solid var(--background-modifier-accent);
+    border-radius: 8px;
+    background: var(--background-tertiary);
+}
+.vc-ipa-kpi span { display: block; margin-bottom: 2px; color: var(--text-muted); font-size: 10px; }
+.vc-ipa-kpi strong { display: block; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.vc-ipa-badges { flex-wrap: wrap; gap: 6px; }
+.vc-ipa-badge {
+    padding: 4px 7px;
+    border-radius: 999px;
+    background: var(--background-tertiary);
+    color: var(--text-muted);
+    font-size: 10px;
+    font-weight: 700;
+}
+.vc-ipa-badge.is-on { color: var(--status-positive); }
+.vc-ipa-grid { display: grid; grid-template-columns: 1fr; gap: 1px 12px; }
+.vc-ipa-row {
+    display: grid;
+    grid-template-columns: minmax(90px, .8fr) minmax(0, 1.2fr);
+    gap: 8px;
+    padding: 5px 0;
+    border-bottom: 1px solid var(--background-modifier-accent);
+}
+.vc-ipa-label { color: var(--text-muted); font-size: 11px; }
+.vc-ipa-value { min-width: 0; overflow-wrap: anywhere; font-size: 11px; font-weight: 600; }
+.vc-ipa-user-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; }
+.vc-ipa-user-card {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 9px 10px;
+    border: 1px solid var(--background-modifier-accent);
+    border-radius: 9px;
+    background: var(--background-tertiary);
+}
+.vc-ipa-user-card:hover, .vc-ipa-user-card.is-open { border-color: var(--interactive-active); }
+.vc-ipa-user-presence { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--status-positive); }
+.vc-ipa-user-copy { display: flex; flex-direction: column; min-width: 0; }
+.vc-ipa-user-copy strong, .vc-ipa-user-copy span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vc-ipa-user-copy span { color: var(--text-muted); font-size: 10px; }
+.vc-ipa-user-tooltip {
+    display: none;
+    position: absolute;
+    left: 0;
+    top: calc(100% + 7px);
+    z-index: 1000;
+    width: 410px;
+    max-width: min(410px, 82vw);
+    padding: 12px;
+    border: 1px solid var(--background-modifier-accent);
+    border-radius: 10px;
+    background: var(--background-floating);
+    box-shadow: var(--elevation-high);
+}
+.vc-ipa-user-card:hover .vc-ipa-user-tooltip,
+.vc-ipa-user-card.is-open .vc-ipa-user-tooltip { display: block; }
+.vc-ipa-tooltip-head { display: flex; flex-direction: column; margin-bottom: 9px; }
+.vc-ipa-tooltip-head > span { color: var(--text-muted); font-size: 10px; }
+.vc-ipa-tooltip-grid {
+    display: grid;
+    grid-template-columns: 115px minmax(0, 1fr);
+    gap: 6px 8px;
+    font-size: 11px;
+}
+.vc-ipa-tooltip-grid > span { color: var(--text-muted); }
+.vc-ipa-tooltip-grid code, .vc-ipa-tooltip-grid strong { min-width: 0; overflow-wrap: anywhere; }
+.vc-ipa-tooltip-warning {
+    margin: 10px 0 0;
+    padding-top: 9px;
+    border-top: 1px solid var(--background-modifier-accent);
+    color: var(--text-muted);
+    font-size: 10px;
+    line-height: 1.4;
+}
+.vc-ipa-panel-note { margin-top: 9px; color: var(--text-muted); font-size: 10px; line-height: 1.4; }
+.vc-ipa-capture-meta { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 12px; margin-bottom: 10px; }
+.vc-ipa-protocol-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 10px 0 12px; }
+.vc-ipa-counter-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 5px; margin-top: 6px; }
+.vc-ipa-counter-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 7px;
+    padding: 6px 7px; border: 1px solid var(--background-modifier-accent); border-radius: 7px;
+    background: var(--background-tertiary); font-size: 10px;
+}
+.vc-ipa-proto { max-width: 70px; overflow: hidden; padding: 3px 5px; text-overflow: ellipsis; }
+.vc-ipa-table-scroll { width: 100%; overflow-x: auto; border-radius: 8px; }
+.vc-ipa-flow-table, .vc-ipa-packet-table {
+    overflow: hidden;
+    border: 1px solid var(--background-modifier-accent);
+    border-radius: 8px;
+}
+.vc-ipa-flow-table-deep { min-width: 1680px; }
+.vc-ipa-flow-header, .vc-ipa-flow-row {
+    display: grid;
+    grid-template-columns: 115px minmax(165px, 1fr) minmax(165px, 1fr) 62px 95px 130px 220px 170px 190px 185px minmax(260px, 1.4fr);
+    gap: 8px;
+    align-items: center;
+    padding: 7px 9px;
+}
+.vc-ipa-flow-header, .vc-ipa-packet-header {
+    background: var(--background-tertiary);
+    color: var(--text-muted);
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+}
+.vc-ipa-flow-row { border-top: 1px solid var(--background-modifier-accent); font-size: 10px; }
+.vc-ipa-flow-row code, .vc-ipa-packet-row code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vc-ipa-packet-table { min-width: 1280px; }
+.vc-ipa-packet-header, .vc-ipa-packet-row {
+    display: grid;
+    grid-template-columns: 60px 72px 115px minmax(170px, 1fr) minmax(170px, 1fr) 55px minmax(180px, 1fr) minmax(290px, 1.6fr);
+    gap: 8px;
+    align-items: center;
+    padding: 7px 9px;
+}
+.vc-ipa-packet-row { border-top: 1px solid var(--background-modifier-accent); font-size: 10px; }
+.vc-ipa-packet-row > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vc-ipa-packet-row:hover, .vc-ipa-flow-row:hover { background: var(--background-modifier-hover); }
+.vc-ipa-event-list { display: grid; gap: 5px; }
+.vc-ipa-event {
+    display: grid;
+    grid-template-columns: 48px 78px minmax(0, 1fr) 60px;
+    gap: 8px;
+    align-items: center;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--background-modifier-accent);
+    font-size: 10px;
+}
+.vc-ipa-event-kind { padding: 3px 5px; }
+.vc-ipa-event-joined .vc-ipa-event-kind { color: var(--status-positive); }
+.vc-ipa-event-left .vc-ipa-event-kind { color: var(--status-danger); }
+.vc-ipa-chart-block { margin-bottom: 10px; }
+.vc-ipa-chart-block > span { display: block; margin-bottom: 4px; color: var(--text-muted); font-size: 10px; }
+.vc-ipa-spark { display: block; width: 100%; height: 44px; }
+.vc-ipa-flow-protocol { gap: 4px; min-width: 0; }
+</style>
+</head>
+<body>
+<div class="preview-chrome">
+    <strong>Preview only</strong> — this is the advanced Internet Protocol Assessment overlay layout with sample capture data. Discord is not running this yet. Hover a participant card to open the endpoint tooltip.
+</div>
+<div class="fake-discord">
+<div class="vc-ipa-root is-live" role="dialog" aria-label="Internet Protocol Assessment">
+<div class="vc-ipa-card">
+<header class="vc-ipa-bar">
+    <div class="vc-ipa-title-wrap">
+        <span class="vc-ipa-mark" aria-hidden="true"></span>
+        <div class="vc-ipa-titles">
+            <span class="vc-ipa-title">Internet Protocol Assessment</span>
+            <span class="vc-ipa-sub">Live capture · 184.2 pkt/s · Ethernet</span>
+        </div>
+    </div>
+    <div class="vc-ipa-actions">
+        <button type="button" class="vc-ipa-btn vc-ipa-btn-start is-stop">Stop</button>
+        <button type="button" class="vc-ipa-btn" title="Minimize">–</button>
+        <button type="button" class="vc-ipa-btn" title="Maximize">▢</button>
+        <button type="button" class="vc-ipa-btn vc-ipa-btn-close" title="Close">×</button>
+    </div>
+</header>
+
+<div class="vc-ipa-body vc-ipa-tech-body">
+<section class="vc-ipa-top-grid">
+    <div class="vc-ipa-panel">
+        <div class="vc-ipa-section-head">
+            <div>
+                <span class="vc-ipa-eyebrow">VOICE SESSION</span>
+                <h2 class="vc-ipa-heading">General</h2>
+            </div>
+            <span class="vc-ipa-status-pill is-ok">CONNECTED</span>
+        </div>
+        <div class="vc-ipa-kpis">
+            <div class="vc-ipa-kpi"><span>Peers</span><strong>2</strong></div>
+            <div class="vc-ipa-kpi"><span>RTT</span><strong>38 ms</strong></div>
+            <div class="vc-ipa-kpi"><span>Jitter</span><strong>1.4 ms</strong></div>
+            <div class="vc-ipa-kpi"><span>Loss</span><strong>0.1%</strong></div>
+            <div class="vc-ipa-kpi"><span>Bitrate</span><strong>64 kbps</strong></div>
+        </div>
+        <div class="vc-ipa-badges">
+            <span class="vc-ipa-badge is-on">Speaking</span>
+            <span class="vc-ipa-badge">Video</span>
+            <span class="vc-ipa-badge">Stream</span>
+            <span class="vc-ipa-badge">Muted</span>
+            <span class="vc-ipa-badge">Deafened</span>
+        </div>
+    </div>
+    <div class="vc-ipa-panel">
+        <div class="vc-ipa-section-head">
+            <div>
+                <span class="vc-ipa-eyebrow">TRANSPORT SECURITY</span>
+                <h2 class="vc-ipa-heading">RTC / ICE / DTLS</h2>
+            </div>
+        </div>
+        <div class="vc-ipa-grid">
+            <div class="vc-ipa-row"><span class="vc-ipa-label">RTC state</span><span class="vc-ipa-value">RTC_CONNECTED</span></div>
+            <div class="vc-ipa-row"><span class="vc-ipa-label">Transport</span><span class="vc-ipa-value">UDP</span></div>
+            <div class="vc-ipa-row"><span class="vc-ipa-label">DTLS state</span><span class="vc-ipa-value">connected</span></div>
+            <div class="vc-ipa-row"><span class="vc-ipa-label">DTLS cipher</span><span class="vc-ipa-value">TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256</span></div>
+            <div class="vc-ipa-row"><span class="vc-ipa-label">SRTP cipher</span><span class="vc-ipa-value">AEAD_AES_128_GCM</span></div>
+            <div class="vc-ipa-row"><span class="vc-ipa-label">ICE candidate</span><span class="vc-ipa-value">succeeded</span></div>
+            <div class="vc-ipa-row"><span class="vc-ipa-label">Remote endpoint</span><span class="vc-ipa-value">162.159.136.232:50004</span></div>
+            <div class="vc-ipa-row"><span class="vc-ipa-label">Audio codecs</span><span class="vc-ipa-value">opus</span></div>
+        </div>
+    </div>
+</section>
+
+<section class="vc-ipa-panel">
+    <div class="vc-ipa-section-head">
+        <div>
+            <span class="vc-ipa-eyebrow">PARTICIPANTS</span>
+            <h2 class="vc-ipa-heading">Users in voice</h2>
+        </div>
+        <span class="vc-ipa-count-pill">2</span>
+    </div>
+    <div class="vc-ipa-user-grid">
+        <div class="vc-ipa-user-card is-open" tabindex="0">
+            <span class="vc-ipa-user-presence"></span>
+            <div class="vc-ipa-user-copy">
+                <strong>Jordan</strong>
+                <span>Connected to voice</span>
+            </div>
+            <div class="vc-ipa-user-tooltip" role="tooltip">
+                <div class="vc-ipa-tooltip-head">
+                    <strong>Jordan</strong>
+                    <span>Voice participant</span>
+                </div>
+                <div class="vc-ipa-tooltip-grid">
+                    <span>Name</span><strong>Jordan</strong>
+                    <span>User ID</span><code>142857192837465600</code>
+                    <span>Peers</span><strong>2</strong>
+                    <span>Observed endpoint</span><code>162.159.136.232:50004</code>
+                    <span>Authorized label</span><strong>Not enrolled</strong>
+                    <span>Regional area</span><strong>San Francisco, US (RTC infra)</strong>
+                    <span>Transport</span><strong>UDP / DTLS</strong>
+                    <span>Packets</span><strong>18420</strong>
+                    <span>Inter-packet Δ</span><strong>20.012 ms</strong>
+                    <span>Security</span><strong>Encrypted transport</strong>
+                </div>
+                <p class="vc-ipa-tooltip-warning">
+                    IP and region describe the voice-network endpoint visible to your client.
+                    Discord can use shared RTC/relay infrastructure, so this is not asserted
+                    to be this participant's personal IP or physical location.
+                </p>
+            </div>
+        </div>
+        <div class="vc-ipa-user-card" tabindex="0">
+            <span class="vc-ipa-user-presence"></span>
+            <div class="vc-ipa-user-copy">
+                <strong>You</strong>
+                <span>Connected to voice</span>
+            </div>
+        </div>
+    </div>
+    <div class="vc-ipa-panel-note">Hover or keyboard-focus a user for their Discord name/ID plus the currently observed voice-network endpoint.</div>
+</section>
+
+<section class="vc-ipa-panel">
+    <div class="vc-ipa-section-head">
+        <div>
+            <span class="vc-ipa-eyebrow">NETWORK FORENSICS</span>
+            <h2 class="vc-ipa-heading">Wireshark / TShark live packet telemetry</h2>
+        </div>
+        <span class="vc-ipa-status-pill is-ok">CAPTURE ACTIVE</span>
+    </div>
+    <div class="vc-ipa-forensic-kpis">
+        <div class="vc-ipa-kpi"><span>Total frames</span><strong>24118</strong></div>
+        <div class="vc-ipa-kpi"><span>Captured bytes</span><strong>18.4 MiB</strong></div>
+        <div class="vc-ipa-kpi"><span>Packet rate</span><strong>184.2 pps</strong></div>
+        <div class="vc-ipa-kpi"><span>Average wire rate</span><strong>1.2 Mb/s</strong></div>
+        <div class="vc-ipa-kpi"><span>Flows</span><strong>6</strong></div>
+    </div>
+    <div class="vc-ipa-capture-meta">
+        <div class="vc-ipa-row"><span class="vc-ipa-label">Capture interface</span><span class="vc-ipa-value">Ethernet</span></div>
+        <div class="vc-ipa-row"><span class="vc-ipa-label">PCAPNG archive</span><span class="vc-ipa-value">C:\Users\Massi\WiresharkCaptures\ipa-live.pcapng</span></div>
+        <div class="vc-ipa-row"><span class="vc-ipa-label">GeoIP database</span><span class="vc-ipa-value">Enabled</span></div>
+        <div class="vc-ipa-row"><span class="vc-ipa-label">Capture uptime</span><span class="vc-ipa-value">131.0 s</span></div>
+        <div class="vc-ipa-row"><span class="vc-ipa-label">Last bridge update</span><span class="vc-ipa-value">22:09:14</span></div>
+        <div class="vc-ipa-row"><span class="vc-ipa-label">Bridge fault</span><span class="vc-ipa-value">None</span></div>
+    </div>
+    <div class="vc-ipa-protocol-columns">
+        <div>
+            <span class="vc-ipa-eyebrow">L4 DISTRIBUTION</span>
+            <div class="vc-ipa-counter-list">
+                <div class="vc-ipa-counter-row"><span class="vc-ipa-proto">UDP</span><strong>19840</strong></div>
+                <div class="vc-ipa-counter-row"><span class="vc-ipa-proto">TCP</span><strong>3912</strong></div>
+                <div class="vc-ipa-counter-row"><span class="vc-ipa-proto">ICMP</span><strong>24</strong></div>
+            </div>
+        </div>
+        <div>
+            <span class="vc-ipa-eyebrow">DISSECTOR / APPLICATION PROTOCOLS</span>
+            <div class="vc-ipa-counter-list">
+                <div class="vc-ipa-counter-row"><span class="vc-ipa-proto">DTLS</span><strong>16210</strong></div>
+                <div class="vc-ipa-counter-row"><span class="vc-ipa-proto">STUN</span><strong>1880</strong></div>
+                <div class="vc-ipa-counter-row"><span class="vc-ipa-proto">TLS</span><strong>2410</strong></div>
+                <div class="vc-ipa-counter-row"><span class="vc-ipa-proto">QUIC</span><strong>640</strong></div>
+                <div class="vc-ipa-counter-row"><span class="vc-ipa-proto">DNS</span><strong>88</strong></div>
+            </div>
+        </div>
+    </div>
+    <div class="vc-ipa-table-scroll">
+        <div class="vc-ipa-flow-table vc-ipa-flow-table-deep">
+            <div class="vc-ipa-flow-header">
+                <span>L4 / App</span><span>Source endpoint</span><span>Destination endpoint</span>
+                <span>Stream</span><span>Pkts / Bytes</span><span>Δ / ACK RTT</span>
+                <span>TCP analysis</span><span>IP QoS</span><span>ICE/STUN</span>
+                <span>GeoIP / auth</span><span>TLS / QUIC / security</span>
+            </div>
+            <div class="vc-ipa-flow-row">
+                <span class="vc-ipa-flow-protocol"><span class="vc-ipa-proto">UDP</span><span class="vc-ipa-proto">DTLS</span></span>
+                <code>192.168.1.24:54112</code>
+                <code>162.159.136.232:50004</code>
+                <code>udp.0</code>
+                <span>16210 / 12.1 MiB</span>
+                <span>20.012 ms / -</span>
+                <span>R:0 F:0 D:0 O:0 · Win:- · BIF:-</span>
+                <span>TTL:64 DSCP:46 ECN:0 Frag:0</span>
+                <span>-</span>
+                <span>San Francisco, US</span>
+                <span>Encrypted transport · DTLS 1.2</span>
+            </div>
+            <div class="vc-ipa-flow-row">
+                <span class="vc-ipa-flow-protocol"><span class="vc-ipa-proto">UDP</span><span class="vc-ipa-proto">STUN</span></span>
+                <code>192.168.1.24:54112</code>
+                <code>162.159.136.232:3478</code>
+                <code>udp.1</code>
+                <span>1880 / 412.0 KiB</span>
+                <span>18.400 ms / -</span>
+                <span>R:0 F:0 D:0 O:0 · Win:- · BIF:-</span>
+                <span>TTL:64 DSCP:0 ECN:0 Frag:0</span>
+                <span>Binding Success · 203.0.113.40:54112</span>
+                <span>San Francisco, US</span>
+                <span>ICE / XOR-MAPPED-ADDRESS</span>
+            </div>
+            <div class="vc-ipa-flow-row">
+                <span class="vc-ipa-flow-protocol"><span class="vc-ipa-proto">UDP</span><span class="vc-ipa-proto">DNS</span></span>
+                <code>192.168.1.40:5353</code>
+                <code>192.168.1.1:53</code>
+                <code>udp.4</code>
+                <span>12 / 1.8 KiB</span>
+                <span>2.110 ms / -</span>
+                <span>R:0 F:0 D:0 O:0 · Win:- · BIF:-</span>
+                <span>TTL:64 DSCP:0 ECN:0 Frag:0</span>
+                <span>-</span>
+                <span>Pixel-Test</span>
+                <span>LAN enrolled device</span>
+            </div>
+            <div class="vc-ipa-flow-row">
+                <span class="vc-ipa-flow-protocol"><span class="vc-ipa-proto">TCP</span><span class="vc-ipa-proto">TLS</span></span>
+                <code>192.168.1.24:49821</code>
+                <code>162.159.137.232:443</code>
+                <code>tcp.3</code>
+                <span>2410 / 3.4 MiB</span>
+                <span>8.200 ms / 12.410 ms</span>
+                <span>R:2 F:0 D:4 O:0 · Win:64240 · BIF:18432</span>
+                <span>TTL:64 DSCP:0 ECN:0 Frag:0</span>
+                <span>-</span>
+                <span>San Francisco, US</span>
+                <span>Encrypted transport · TLS 1.3 · SNI discord.com · ALPN h2</span>
+            </div>
+        </div>
+    </div>
+    <div class="vc-ipa-panel-note">
+        The PCAPNG file is the complete packet capture. GeoIP identifies public endpoints/RTC infrastructure, not participant GPS.
+        Only IPs in --authorized-devices (for example 192.168.1.40 → Pixel-Test) get a device label.
+    </div>
+</section>
+
+<section class="vc-ipa-panel">
+    <div class="vc-ipa-section-head">
+        <div>
+            <span class="vc-ipa-eyebrow">FRAME LOG</span>
+            <h2 class="vc-ipa-heading">Recent decoded packets</h2>
+        </div>
+        <span class="vc-ipa-count-pill">6</span>
+    </div>
+    <div class="vc-ipa-table-scroll">
+        <div class="vc-ipa-packet-table">
+            <div class="vc-ipa-packet-header">
+                <span>No.</span><span>Δ ms</span><span>Protocol</span><span>Source</span><span>Destination</span>
+                <span>Len</span><span>Flags / Seq / Ack</span><span>Analysis / Info</span>
+            </div>
+            <div class="vc-ipa-packet-row">
+                <code>24118</code><span>20.014</span>
+                <span class="vc-ipa-flow-protocol"><span class="vc-ipa-proto">UDP</span><span class="vc-ipa-proto">DTLS</span></span>
+                <code>192.168.1.24:54112</code><code>162.159.136.232:50004</code>
+                <span>172</span><code>- · S:- A:- · RTT:-</code>
+                <span>Application Data · encrypted</span>
+            </div>
+            <div class="vc-ipa-packet-row">
+                <code>24117</code><span>19.988</span>
+                <span class="vc-ipa-flow-protocol"><span class="vc-ipa-proto">UDP</span><span class="vc-ipa-proto">DTLS</span></span>
+                <code>162.159.136.232:50004</code><code>192.168.1.24:54112</code>
+                <span>188</span><code>- · S:- A:- · RTT:-</code>
+                <span>Application Data · encrypted</span>
+            </div>
+            <div class="vc-ipa-packet-row">
+                <code>24110</code><span>0.412</span>
+                <span class="vc-ipa-flow-protocol"><span class="vc-ipa-proto">UDP</span><span class="vc-ipa-proto">STUN</span></span>
+                <code>192.168.1.24:54112</code><code>162.159.136.232:3478</code>
+                <span>108</span><code>- · S:- A:- · RTT:-</code>
+                <span>STUN Binding Success · XOR-MAPPED-ADDRESS 203.0.113.40:54112</span>
+            </div>
+            <div class="vc-ipa-packet-row">
+                <code>24088</code><span>8.201</span>
+                <span class="vc-ipa-flow-protocol"><span class="vc-ipa-proto">TCP</span><span class="vc-ipa-proto">TLS</span></span>
+                <code>192.168.1.24:49821</code><code>162.159.137.232:443</code>
+                <span>1420</span><code>PA · S:918273 A:441122 · RTT:12.410ms</code>
+                <span>SNI discord.com · ALPN h2 · Application Data</span>
+            </div>
+            <div class="vc-ipa-packet-row">
+                <code>24040</code><span>2.110</span>
+                <span class="vc-ipa-flow-protocol"><span class="vc-ipa-proto">UDP</span><span class="vc-ipa-proto">DNS</span></span>
+                <code>192.168.1.40:5353</code><code>192.168.1.1:53</code>
+                <span>86</span><code>- · S:- A:- · RTT:-</code>
+                <span>DNS gateway.discord.gg · Pixel-Test</span>
+            </div>
+            <div class="vc-ipa-packet-row">
+                <code>23991</code><span>0.080</span>
+                <span class="vc-ipa-flow-protocol"><span class="vc-ipa-proto">TCP</span><span class="vc-ipa-proto">TLS</span></span>
+                <code>192.168.1.24:49821</code><code>162.159.137.232:443</code>
+                <span>66</span><code>A · S:919693 A:441188 · RTT:11.902ms</code>
+                <span>Dup ACK · window update</span>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="vc-ipa-bottom-grid">
+    <div class="vc-ipa-panel">
+        <div class="vc-ipa-section-head">
+            <div>
+                <span class="vc-ipa-eyebrow">EVENT CORRELATION</span>
+                <h2 class="vc-ipa-heading">Join / leave timeline</h2>
+            </div>
+        </div>
+        <div class="vc-ipa-event-list">
+            <div class="vc-ipa-event vc-ipa-event-joined">
+                <span class="vc-ipa-event-kind">JOIN</span>
+                <span>10:07:02 PM</span>
+                <strong>Jordan joined General</strong>
+                <span>2 peers</span>
+            </div>
+            <div class="vc-ipa-event vc-ipa-event-joined">
+                <span class="vc-ipa-event-kind">JOIN</span>
+                <span>10:06:41 PM</span>
+                <strong>You joined General</strong>
+                <span>1 peer</span>
+            </div>
+            <div class="vc-ipa-event vc-ipa-event-left">
+                <span class="vc-ipa-event-kind">LEAVE</span>
+                <span>10:04:18 PM</span>
+                <strong>Alex left General</strong>
+                <span>0 peers</span>
+            </div>
+        </div>
+    </div>
+    <div class="vc-ipa-panel">
+        <div class="vc-ipa-section-head">
+            <div>
+                <span class="vc-ipa-eyebrow">CONNECTION HISTORY</span>
+                <h2 class="vc-ipa-heading">Latency / loss</h2>
+            </div>
+        </div>
+        <div class="vc-ipa-chart-block">
+            <span>RTT</span>
+            <svg class="vc-ipa-spark" viewBox="0 0 280 44" preserveAspectRatio="none" aria-hidden="true">
+                <polyline fill="none" stroke="#5865f2" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"
+                    points="0,28 20,26 40,30 60,22 80,24 100,18 120,20 140,16 160,22 180,14 200,18 220,12 240,16 260,10 280,14" />
+            </svg>
+        </div>
+        <div class="vc-ipa-chart-block">
+            <span>Packet loss</span>
+            <svg class="vc-ipa-spark" viewBox="0 0 280 44" preserveAspectRatio="none" aria-hidden="true">
+                <polyline fill="none" stroke="#f23f43" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"
+                    points="0,40 20,38 40,40 60,36 80,40 100,38 120,40 140,32 160,40 180,38 200,40 220,36 240,40 260,38 280,40" />
+            </svg>
+        </div>
+        <div class="vc-ipa-grid">
+            <div class="vc-ipa-row"><span class="vc-ipa-label">Packets in</span><span class="vc-ipa-value">18420</span></div>
+            <div class="vc-ipa-row"><span class="vc-ipa-label">Packets out</span><span class="vc-ipa-value">17988</span></div>
+            <div class="vc-ipa-row"><span class="vc-ipa-label">Packets lost</span><span class="vc-ipa-value">18</span></div>
+            <div class="vc-ipa-row"><span class="vc-ipa-label">Quality</span><span class="vc-ipa-value">Excellent</span></div>
+            <div class="vc-ipa-row"><span class="vc-ipa-label">Voice server</span><span class="vc-ipa-value">us-west8.discord.gg</span></div>
+            <div class="vc-ipa-row"><span class="vc-ipa-label">Payload</span><span class="vc-ipa-value">Not performed</span></div>
+        </div>
+    </div>
+</section>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

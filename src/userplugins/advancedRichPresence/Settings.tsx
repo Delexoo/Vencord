@@ -11,11 +11,12 @@ import { Switch } from "@components/Switch";
 import { debounce } from "@shared/debounce";
 import { classNameFactory } from "@utils/css";
 import { ActivityType } from "@vencord/discord-types/enums";
-import { Button, Select, showToast, Text, TextArea, TextInput, Toasts, useEffect, useState } from "@webpack/common";
+import { Button, Select, showToast, Text, TextArea, TextInput, Toasts, useEffect, useLayoutEffect, useState } from "@webpack/common";
 import type { ReactNode } from "react";
 
 import AdvancedRichPresence, { setRpc, settings, TimestampMode } from ".";
 import type { PresencePreset } from "./markdown";
+import { LiveProfilePreview } from "./Preview";
 import {
     createNewPreset,
     deletePresetFile,
@@ -24,6 +25,7 @@ import {
     openPresetsFolder,
     refreshPresets,
     saveCurrentAsPreset,
+    subscribePresets,
 } from "./store";
 
 const cl = classNameFactory("vc-arp-");
@@ -124,14 +126,14 @@ function PairSetting<T>(props: { data: [TextOption<T>, TextOption<T>]; }) {
 }
 
 function SingleSetting<T>({ settingsKey, label, disabled, isValid, transform, hint, placeholder }: TextOption<T>) {
-    const s = settings.use(["activeFile"] as never);
+    const s = settings.use(["activeFile", "activeName"] as never);
     const [state, setState] = useState(settings.store[settingsKey] ?? "");
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
         setState(settings.store[settingsKey] ?? "");
         setError(null);
-    }, [s.activeFile, settingsKey]);
+    }, [s.activeFile, s.activeName, settingsKey]);
 
     function handleChange(newValue: any) {
         if (transform) newValue = transform(newValue);
@@ -228,24 +230,16 @@ function PresetManager() {
     const [newName, setNewName] = useState("");
     const [busy, setBusy] = useState(false);
 
-    async function reloadList() {
-        setBusy(true);
-        try {
-            setPresets(await refreshPresets());
-        } catch (e) {
-            toast(String(e), Toasts.Type.FAILURE);
-        } finally {
-            setBusy(false);
-        }
-    }
+    useEffect(() => subscribePresets(setPresets), []);
 
     useEffect(() => {
-        void reloadList();
+        void refreshPresets().catch(e => toast(String(e), Toasts.Type.FAILURE));
     }, []);
 
     const active = s.activeFile || "";
     const hasActive = Boolean(s.activeFile);
     const enabled = s.rpcEnabled !== false;
+    const selectKey = `${active}:${presets.map(p => p.fileName).join(",")}`;
 
     async function run(fn: () => Promise<void>) {
         if (busy) return;
@@ -283,6 +277,7 @@ function PresetManager() {
                 description="Select a saved status. Your edits apply to the one that’s selected."
             >
                 <Select
+                    key={selectKey}
                     placeholder={presets.length ? "Select a preset" : "No presets yet — create one below"}
                     options={presets.map(p => ({
                         label: p.fileName === active ? `${p.name} (selected)` : p.name,
@@ -291,16 +286,16 @@ function PresetManager() {
                     maxVisibleItems={8}
                     serialize={String}
                     isSelected={v => v === active}
-                    select={async file => {
-                        if (!file || file === active) return;
-                        await run(async () => {
+                    select={file => {
+                        if (!file || file === active || busy) return;
+                        void run(async () => {
                             await loadPresetIntoStore(settings.store, file);
                             updateRPC();
                             toast(`Now using “${settings.store.activeName}”`);
                         });
                     }}
                     closeOnSelect
-                    isDisabled={busy || presets.length === 0}
+                    isDisabled={presets.length === 0}
                 />
             </SettingsSection>
 
@@ -321,7 +316,6 @@ function PresetManager() {
                         onClick={() => run(async () => {
                             const p = await createNewPreset(settings.store, newName);
                             toast(`Created “${p.name}”`);
-                            setPresets(getCachedPresets());
                             setNewName("");
                             updateRPC();
                         })}
@@ -348,7 +342,6 @@ function PresetManager() {
                                 s.activeFile
                             );
                             toast(`Saved “${p.name}”`);
-                            setPresets(getCachedPresets());
                             updateRPC();
                         })}
                     >
@@ -363,7 +356,6 @@ function PresetManager() {
                             const gone = s.activeName || "preset";
                             await deletePresetFile(settings.store, s.activeFile);
                             toast(`Deleted “${gone}”`);
-                            setPresets(getCachedPresets());
                             updateRPC();
                         })}
                     >
@@ -505,11 +497,43 @@ function RpcFields() {
     );
 }
 
+function useWidePluginModal() {
+    useLayoutEffect(() => {
+        const root = document.querySelector(".vc-arp-root");
+        const dialog = root?.closest('[role="dialog"]') as HTMLElement | null;
+        if (!dialog) return;
+
+        const marked = new Set<HTMLElement>([dialog]);
+        dialog.classList.add("vc-arp-wide");
+
+        let el: HTMLElement | null = dialog;
+        for (let i = 0; i < 5 && el; i++) {
+            const maxW = getComputedStyle(el).maxWidth;
+            if (maxW && maxW !== "none" && parseFloat(maxW) > 0 && parseFloat(maxW) < 1080) {
+                el.classList.add("vc-arp-wide");
+                marked.add(el);
+            }
+            el = el.parentElement;
+        }
+
+        return () => {
+            for (const node of marked) node.classList.remove("vc-arp-wide");
+        };
+    }, []);
+}
+
 export function PresenceSettings() {
+    useWidePluginModal();
+
     return (
         <div className={cl("root")}>
-            <PresetManager />
-            <RpcFields />
+            <div className={cl("pane")}>
+                <PresetManager />
+                <RpcFields />
+            </div>
+            <aside className={cl("side")}>
+                <LiveProfilePreview />
+            </aside>
         </div>
     );
 }

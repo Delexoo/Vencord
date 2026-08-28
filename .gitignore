@@ -26,6 +26,9 @@ installer/bin/
 installer/obj/
 installer/publish/
 
+**/__pycache__/
+*.pyc
+
 # Track Delexo plugins in this fork (upstream Vencord ignores them).
 # src/userplugins
 

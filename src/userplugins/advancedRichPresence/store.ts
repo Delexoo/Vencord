@@ -29,9 +29,26 @@ export type StoreShape = PresenceFields & {
 };
 
 let cache: PresencePreset[] = [];
+const listeners = new Set<(list: PresencePreset[]) => void>();
+let refreshGen = 0;
 
 export function getCachedPresets() {
     return cache;
+}
+
+export function subscribePresets(cb: (list: PresencePreset[]) => void) {
+    listeners.add(cb);
+    cb(cache);
+    return () => { listeners.delete(cb); };
+}
+
+function setCache(next: PresencePreset[]) {
+    cache = next.slice().sort((a, b) => a.name.localeCompare(b.name));
+    for (const cb of listeners) cb(cache);
+}
+
+function upsertCache(preset: PresencePreset) {
+    setCache([...cache.filter(p => p.fileName !== preset.fileName), preset]);
 }
 
 function uniqueDisplayName(desired: string) {
@@ -62,19 +79,22 @@ async function writeAndSelect(store: StoreShape, preset: PresencePreset) {
     (store as any).notes = preset.notes || "";
     store.activeFile = preset.fileName;
     store.activeName = preset.name;
-    await refreshPresets();
+    upsertCache(preset);
+    void refreshPresets();
     return preset;
 }
 
 export async function refreshPresets(): Promise<PresencePreset[]> {
+    const gen = ++refreshGen;
     if (!Native) {
-        cache = [];
+        if (gen === refreshGen) setCache([]);
         return cache;
     }
     await Native.getPresetsDir();
     const listed = await Native.listPresetFiles();
+    if (gen !== refreshGen) return cache;
     if (!listed.ok) {
-        cache = [];
+        setCache([]);
         return cache;
     }
     let files: string[] = [];
@@ -82,14 +102,13 @@ export async function refreshPresets(): Promise<PresencePreset[]> {
 
     const out: PresencePreset[] = [];
     for (const file of files) {
-        if (file.toLowerCase() === "harvard-online.md") continue;
         const res = await Native.readPresetFile(file);
+        if (gen !== refreshGen) return cache;
         if (!res.ok) continue;
         const preset = parsePresetMarkdown(file, res.data);
         if (preset) out.push(preset);
     }
-    out.sort((a, b) => a.name.localeCompare(b.name));
-    cache = out;
+    if (gen === refreshGen) setCache(out);
     return cache;
 }
 
@@ -139,7 +158,8 @@ export async function saveCurrentAsPreset(store: StoreShape, name: string, overw
     if (!res.ok) throw new Error(res.data);
     store.activeFile = fileName;
     store.activeName = preset.name;
-    await refreshPresets();
+    upsertCache(preset);
+    void refreshPresets();
     return preset;
 }
 
@@ -159,14 +179,15 @@ export async function deletePresetFile(store: StoreShape, fileName: string) {
     if (!Native) throw new Error("Desktop Discord required");
     const res = await Native.deletePresetFile(fileName);
     if (!res.ok) throw new Error(res.data);
-    const remaining = (await refreshPresets()).filter(p => p.fileName !== fileName);
+    setCache(cache.filter(p => p.fileName !== fileName));
     if (store.activeFile === fileName) {
-        if (remaining[0]) await loadPresetIntoStore(store, remaining[0].fileName);
+        if (cache[0]) await loadPresetIntoStore(store, cache[0].fileName);
         else {
             store.activeFile = undefined;
             store.activeName = undefined;
         }
     }
+    void refreshPresets();
 }
 
 export async function renamePreset(store: StoreShape, fileName: string, newName: string) {
@@ -188,7 +209,8 @@ export async function renamePreset(store: StoreShape, fileName: string, newName:
         store.activeFile = nextFile;
         store.activeName = updated.name;
     }
-    await refreshPresets();
+    setCache([...cache.filter(p => p.fileName !== fileName && p.fileName !== nextFile), updated]);
+    void refreshPresets();
     return updated;
 }
 
