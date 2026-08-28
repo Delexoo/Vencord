@@ -9,7 +9,6 @@ import { ActivityType } from "@vencord/discord-types/enums";
 
 import {
     applyFields,
-    harvardOnlineSeed,
     newId,
     parsePresetMarkdown,
     PresenceFields,
@@ -81,14 +80,9 @@ export async function refreshPresets(): Promise<PresencePreset[]> {
     let files: string[] = [];
     try { files = JSON.parse(listed.data); } catch { files = []; }
 
-    if (!files.length) {
-        const seed = harvardOnlineSeed();
-        await Native.writePresetFile(seed.fileName, serializePresetMarkdown(seed));
-        files = [seed.fileName];
-    }
-
     const out: PresencePreset[] = [];
     for (const file of files) {
+        if (file.toLowerCase() === "harvard-online.md") continue;
         const res = await Native.readPresetFile(file);
         if (!res.ok) continue;
         const preset = parsePresetMarkdown(file, res.data);

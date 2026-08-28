@@ -6,12 +6,12 @@
 
 import { isPluginEnabled } from "@api/PluginManager";
 import { ExpandableSection } from "@components/ExpandableCard";
-import { Heading } from "@components/Heading";
-import { resolveError } from "@components/settings/tabs/plugins/components/Common";
+import { resolveError, SettingsSection } from "@components/settings/tabs/plugins/components/Common";
+import { Switch } from "@components/Switch";
 import { debounce } from "@shared/debounce";
 import { classNameFactory } from "@utils/css";
 import { ActivityType } from "@vencord/discord-types/enums";
-import { Button, Select, showToast, Switch, Text, TextArea, TextInput, Toasts, useEffect, useState } from "@webpack/common";
+import { Button, Select, showToast, Text, TextArea, TextInput, Toasts, useEffect, useState } from "@webpack/common";
 import type { ReactNode } from "react";
 
 import AdvancedRichPresence, { setRpc, settings, TimestampMode } from ".";
@@ -19,12 +19,10 @@ import type { PresencePreset } from "./markdown";
 import {
     createNewPreset,
     deletePresetFile,
-    duplicatePreset,
     getCachedPresets,
     loadPresetIntoStore,
     openPresetsFolder,
     refreshPresets,
-    renamePreset,
     saveCurrentAsPreset,
 } from "./store";
 
@@ -111,6 +109,7 @@ interface SelectOption<T> {
     settingsKey: SettingsKey;
     label: string;
     disabled?: boolean;
+    hint?: string;
     options: { label: string; value: T; default?: boolean; }[];
 }
 
@@ -149,41 +148,41 @@ function SingleSetting<T>({ settingsKey, label, disabled, isValid, transform, hi
     }
 
     return (
-        <div className={cl("single", { disabled })}>
-            <Heading tag="h5">{label}</Heading>
-            <TextInput
-                type="text"
-                placeholder={placeholder ?? "Enter a value"}
-                value={state as any}
-                onChange={handleChange}
-                disabled={disabled}
-            />
-            {error && <Text className={cl("error")} variant="text-sm/normal">{error}</Text>}
-            {hint ? <Text variant="text-xs/normal" className={cl("hint")}>{hint}</Text> : null}
+        <div className={cl({ disabled })}>
+            <SettingsSection name={label} id={String(settingsKey)} description={hint ?? ""} error={error}>
+                <TextInput
+                    type="text"
+                    placeholder={placeholder ?? "Enter a value"}
+                    value={state as any}
+                    onChange={handleChange}
+                    disabled={disabled}
+                />
+            </SettingsSection>
         </div>
     );
 }
 
-function SelectSetting<T>({ settingsKey, label, options, disabled }: SelectOption<T>) {
+function SelectSetting<T>({ settingsKey, label, options, disabled, hint }: SelectOption<T>) {
     settings.use(["activeFile", settingsKey] as never);
     const selected = settings.store[settingsKey] ?? options.find(o => o.default)?.value;
 
     return (
-        <div className={cl("single", { disabled })}>
-            <Heading tag="h5">{label}</Heading>
-            <Select
-                placeholder="Select an option"
-                options={options}
-                maxVisibleItems={5}
-                closeOnSelect={true}
-                select={v => {
-                    (settings.store as Record<string, unknown>)[settingsKey] = v;
-                    updateRPC();
-                }}
-                isSelected={v => v === selected}
-                serialize={v => String(v)}
-                isDisabled={disabled}
-            />
+        <div className={cl({ disabled })}>
+            <SettingsSection name={label} id={String(settingsKey)} description={hint ?? ""} error={null}>
+                <Select
+                    placeholder="Select an option"
+                    options={options}
+                    maxVisibleItems={5}
+                    closeOnSelect={true}
+                    select={v => {
+                        (settings.store as Record<string, unknown>)[settingsKey] = v;
+                        updateRPC();
+                    }}
+                    isSelected={v => v === selected}
+                    serialize={v => String(v)}
+                    isDisabled={disabled}
+                />
+            </SettingsSection>
         </div>
     );
 }
@@ -209,27 +208,24 @@ function NotesField() {
     }, [s.activeFile, s.notes]);
 
     return (
-        <div className={cl("single")}>
-            <Heading tag="h5">Private notes</Heading>
+        <SettingsSection name="Notes for yourself" id="notes" description="Reminders only you see. Never shown on Discord.">
             <TextArea
                 value={state}
-                placeholder="Reminders for yourself. Saved in the .md file, never shown on Discord."
+                placeholder="Optional notes"
                 onChange={(v: string) => {
                     setState(v);
                     settings.store.notes = v;
                     updateRPC();
                 }}
             />
-        </div>
+        </SettingsSection>
     );
 }
 
 function PresetManager() {
     const s = settings.use(["activeFile", "activeName", "rpcEnabled"] as never);
     const [presets, setPresets] = useState<PresencePreset[]>(getCachedPresets());
-    const [nameDraft, setNameDraft] = useState(s.activeName || "");
-    const [newName, setNewName] = useState("New preset");
-    const [creating, setCreating] = useState(false);
+    const [newName, setNewName] = useState("");
     const [busy, setBusy] = useState(false);
 
     async function reloadList() {
@@ -247,13 +243,9 @@ function PresetManager() {
         void reloadList();
     }, []);
 
-    useEffect(() => {
-        setNameDraft(s.activeName || "");
-    }, [s.activeFile, s.activeName]);
-
     const active = s.activeFile || "";
     const hasActive = Boolean(s.activeFile);
-    const showCreate = creating || presets.length === 0;
+    const enabled = s.rpcEnabled !== false;
 
     async function run(fn: () => Promise<void>) {
         if (busy) return;
@@ -267,144 +259,102 @@ function PresetManager() {
         }
     }
 
-    const enabled = s.rpcEnabled !== false;
-
     return (
-        <div className={cl("section")}>
-            <div className={cl("section-head")}>
-                <Heading tag="h3" className={cl("section-title")}>Presets</Heading>
-                {hasActive && (
-                    <Text variant="text-xs/normal" className={cl("status")}>
-                        {s.activeName}
-                    </Text>
-                )}
-            </div>
-
-            <div className={cl("switch-row")}>
+        <div className={cl("ml")}>
+            <SettingsSection
+                tag="label"
+                name="Show on my profile"
+                id="rpcEnabled"
+                description="Whether friends see this custom status under your name."
+                inlineSetting
+            >
                 <Switch
-                    value={enabled}
+                    checked={enabled}
                     onChange={v => {
                         settings.store.rpcEnabled = v;
                         updateRPC();
                     }}
-                    hideBorder
-                    className={cl("switch")}
-                >
-                    Show on my profile
-                </Switch>
-            </div>
+                />
+            </SettingsSection>
 
-            <Select
-                placeholder="Choose a saved status"
-                options={presets.map(p => ({
-                    label: p.fileName === active ? `${p.name}  ·  in use` : p.name,
-                    value: p.fileName,
-                }))}
-                serialize={String}
-                isSelected={v => v === active}
-                select={async file => {
-                    if (!file || file === active) return;
-                    await run(async () => {
-                        await loadPresetIntoStore(settings.store, file);
-                        updateRPC();
-                        toast(`Now using “${settings.store.activeName}”`);
-                        setNameDraft(settings.store.activeName || "");
-                    });
-                }}
-                closeOnSelect
-            />
+            <SettingsSection
+                name="Preset"
+                id="preset"
+                description="Select a saved status. Your edits apply to the one that’s selected."
+            >
+                <Select
+                    placeholder={presets.length ? "Select a preset" : "No presets yet — create one below"}
+                    options={presets.map(p => ({
+                        label: p.fileName === active ? `${p.name} (selected)` : p.name,
+                        value: p.fileName,
+                    }))}
+                    maxVisibleItems={8}
+                    serialize={String}
+                    isSelected={v => v === active}
+                    select={async file => {
+                        if (!file || file === active) return;
+                        await run(async () => {
+                            await loadPresetIntoStore(settings.store, file);
+                            updateRPC();
+                            toast(`Now using “${settings.store.activeName}”`);
+                        });
+                    }}
+                    closeOnSelect
+                    isDisabled={busy || presets.length === 0}
+                />
+            </SettingsSection>
 
-            {showCreate ? (
-                <div className={cl("create")}>
-                    <div className={cl("create-row")}>
-                        <TextInput
-                            value={newName}
-                            placeholder="Preset name"
-                            onChange={setNewName}
-                        />
-                        <Button
-                            className={cl("btn")}
-                            size={Button.Sizes.SMALL}
-                            disabled={busy || !newName.trim()}
-                            onClick={() => run(async () => {
-                                const p = await createNewPreset(settings.store, newName);
-                                toast(`Created “${p.name}.md”`);
-                                setPresets(getCachedPresets());
-                                setNameDraft(p.name);
-                                setNewName("New preset");
-                                setCreating(false);
-                                updateRPC();
-                            })}
-                        >
-                            Create
-                        </Button>
-                        {presets.length > 0 && (
-                            <Button
-                                className={cl("btn")}
-                                size={Button.Sizes.SMALL}
-                                color={Button.Colors.PRIMARY}
-                                disabled={busy}
-                                onClick={() => {
-                                    setCreating(false);
-                                    setNewName("New preset");
-                                }}
-                            >
-                                Cancel
-                            </Button>
-                        )}
-                    </div>
-                </div>
-            ) : (
-                <div className={cl("btn-row")}>
+            <SettingsSection
+                name="New preset"
+                id="newPreset"
+                description="Type a name and click Create. Copies whatever you’ve filled in below."
+            >
+                <div className={cl("ml-row")}>
+                    <TextInput
+                        value={newName}
+                        placeholder="Studying, Spotify, Gym…"
+                        onChange={setNewName}
+                    />
                     <Button
-                        className={cl("btn")}
                         size={Button.Sizes.SMALL}
-                        disabled={busy}
-                        onClick={() => {
-                            setNewName("New preset");
-                            setCreating(true);
-                        }}
+                        disabled={busy || !newName.trim()}
+                        onClick={() => run(async () => {
+                            const p = await createNewPreset(settings.store, newName);
+                            toast(`Created “${p.name}”`);
+                            setPresets(getCachedPresets());
+                            setNewName("");
+                            updateRPC();
+                        })}
                     >
-                        New
+                        Create
                     </Button>
+                </div>
+            </SettingsSection>
+
+            <SettingsSection
+                name="Save or delete"
+                id="presetActions"
+                description="Save updates the selected preset. Delete removes it from this device."
+            >
+                <div className={cl("ml-row")}>
                     <Button
-                        className={cl("btn")}
                         size={Button.Sizes.SMALL}
-                        color={Button.Colors.PRIMARY}
                         disabled={busy || !hasActive}
                         onClick={() => run(async () => {
                             if (!s.activeFile) return;
                             const p = await saveCurrentAsPreset(
                                 settings.store,
-                                nameDraft.trim() || s.activeName || "Untitled",
+                                s.activeName || "Untitled",
                                 s.activeFile
                             );
-                            toast(`Saved “${p.name}.md”`);
+                            toast(`Saved “${p.name}”`);
                             setPresets(getCachedPresets());
-                            setNameDraft(p.name);
                             updateRPC();
                         })}
                     >
                         Save
                     </Button>
                     <Button
-                        className={cl("btn")}
-                        size={Button.Sizes.SMALL}
-                        color={Button.Colors.PRIMARY}
-                        disabled={busy || !hasActive}
-                        onClick={() => run(async () => {
-                            if (!s.activeFile) return;
-                            const p = await duplicatePreset(settings.store, s.activeFile);
-                            toast(`Duplicated as “${p.name}.md”`);
-                            setPresets(getCachedPresets());
-                            setNameDraft(p.name);
-                            updateRPC();
-                        })}
-                    >
-                        Duplicate
-                    </Button>
-                    <Button
-                        className={cl("btn")}
                         size={Button.Sizes.SMALL}
                         color={Button.Colors.RED}
                         disabled={busy || !hasActive}
@@ -412,65 +362,23 @@ function PresetManager() {
                             if (!s.activeFile) return;
                             const gone = s.activeName || "preset";
                             await deletePresetFile(settings.store, s.activeFile);
-                            toast(`Deleted “${gone}.md”`);
-                            const next = getCachedPresets();
-                            setPresets(next);
-                            setNameDraft(settings.store.activeName || "");
+                            toast(`Deleted “${gone}”`);
+                            setPresets(getCachedPresets());
                             updateRPC();
                         })}
                     >
                         Delete
                     </Button>
+                    <Button
+                        size={Button.Sizes.SMALL}
+                        color={Button.Colors.PRIMARY}
+                        disabled={busy}
+                        onClick={() => run(async () => { await openPresetsFolder(); })}
+                    >
+                        Open folder
+                    </Button>
                 </div>
-            )}
-
-            {hasActive && !showCreate && (
-                <Fold title="Rename">
-                    <div className={cl("rename")}>
-                        <TextInput
-                            value={nameDraft}
-                            placeholder="Preset name"
-                            onChange={setNameDraft}
-                        />
-                        <Button
-                            className={cl("btn")}
-                            size={Button.Sizes.SMALL}
-                            color={Button.Colors.PRIMARY}
-                            disabled={busy || !nameDraft.trim() || nameDraft.trim() === s.activeName}
-                            onClick={() => run(async () => {
-                                if (!s.activeFile) return;
-                                const p = await renamePreset(settings.store, s.activeFile, nameDraft);
-                                toast(`Renamed to “${p.name}.md”`);
-                                setPresets(getCachedPresets());
-                                setNameDraft(p.name);
-                                updateRPC();
-                            })}
-                        >
-                            Rename
-                        </Button>
-                    </div>
-                </Fold>
-            )}
-
-            <div className={cl("link-row")}>
-                <Button
-                    className={cl("link")}
-                    size={Button.Sizes.SMALL}
-                    look={Button.Looks.LINK}
-                    onClick={() => run(async () => { await openPresetsFolder(); })}
-                >
-                    Folder
-                </Button>
-                <Button
-                    className={cl("link")}
-                    size={Button.Sizes.SMALL}
-                    look={Button.Looks.LINK}
-                    disabled={busy}
-                    onClick={() => void reloadList()}
-                >
-                    Refresh
-                </Button>
-            </div>
+            </SettingsSection>
         </div>
     );
 }
@@ -479,12 +387,11 @@ function RpcFields() {
     const s = settings.use(["type", "timestampMode"] as never);
 
     return (
-        <div className={cl("section")}>
-            <Heading tag="h3" className={cl("section-title")}>Activity</Heading>
-
+        <div className={cl("ml")}>
             <SelectSetting
                 settingsKey="type"
-                label="Activity Type"
+                label="Status type"
+                hint="Playing, Streaming, Listening, Watching, or Competing."
                 options={[
                     { label: "Playing", value: ActivityType.PLAYING, default: true },
                     { label: "Streaming", value: ActivityType.STREAMING },
@@ -495,91 +402,98 @@ function RpcFields() {
             />
 
             <PairSetting data={[
-                { settingsKey: "appID", label: "Application ID", isValid: isAppIdValid, placeholder: "1260139887504392200" },
-                { settingsKey: "appName", label: "Application Name", isValid: makeValidator(128, true), placeholder: "Harvard Online" },
+                { settingsKey: "appName", label: "Title", isValid: makeValidator(128, true), placeholder: "My activity", hint: "The bold name people see, like a game or app." },
+                { settingsKey: "appID", label: "App ID (optional)", isValid: isAppIdValid, placeholder: "From Developer Portal", hint: "Only needed if you upload images in the Discord Developer Portal." },
             ]} />
 
             <PairSetting data={[
-                { settingsKey: "details", label: "Detail (line 1)", isValid: maxLength128 },
-                { settingsKey: "detailsURL", label: "Detail URL", isValid: isUrlValid },
+                { settingsKey: "details", label: "Line 1", isValid: maxLength128, placeholder: "What you’re up to", hint: "First line under the title. You can use {user}, {time}, {date}." },
+                { settingsKey: "detailsURL", label: "Line 1 link", isValid: isUrlValid, placeholder: "https://…" },
             ]} />
 
             <PairSetting data={[
-                { settingsKey: "state", label: "State (line 2)", isValid: maxLength128 },
-                { settingsKey: "stateURL", label: "State URL", isValid: isUrlValid },
+                { settingsKey: "state", label: "Line 2", isValid: maxLength128, placeholder: "A bit more detail" },
+                { settingsKey: "stateURL", label: "Line 2 link", isValid: isUrlValid, placeholder: "https://…" },
             ]} />
 
             {s.type === ActivityType.STREAMING && (
                 <SingleSetting
                     settingsKey="streamLink"
-                    label="Stream Link (Twitch or YouTube)"
+                    label="Stream URL"
+                    placeholder="https://twitch.tv/… or YouTube"
                     isValid={isStreamLinkValid}
                 />
             )}
 
-            <Fold title="Images">
+            <Fold title="Pictures">
+                <Text variant="text-xs/normal" className={cl("hint")}>
+                    Paste a direct image link (right-click → Copy image address), not a Discord CDN link.
+                </Text>
                 <PairSetting data={[
-                    { settingsKey: "imageBig", label: "Large Image URL/Key", isValid: isImageKeyValid },
-                    { settingsKey: "imageBigTooltip", label: "Large Image Text", isValid: maxLength128 },
+                    { settingsKey: "imageBig", label: "Large picture", isValid: isImageKeyValid, placeholder: "https://i.imgur.com/…" },
+                    { settingsKey: "imageBigTooltip", label: "Large picture hover text", isValid: maxLength128 },
                 ]} />
-                <SingleSetting settingsKey="imageBigURL" label="Large Image clickable URL" isValid={isUrlValid} />
+                <SingleSetting settingsKey="imageBigURL" label="Large picture click link" isValid={isUrlValid} placeholder="https://…" />
                 <PairSetting data={[
-                    { settingsKey: "imageSmall", label: "Small Image URL/Key", isValid: isImageKeyValid },
-                    { settingsKey: "imageSmallTooltip", label: "Small Image Text", isValid: maxLength128 },
+                    { settingsKey: "imageSmall", label: "Small picture", isValid: isImageKeyValid, placeholder: "https://i.imgur.com/…" },
+                    { settingsKey: "imageSmallTooltip", label: "Small picture hover text", isValid: maxLength128 },
                 ]} />
-                <SingleSetting settingsKey="imageSmallURL" label="Small Image clickable URL" isValid={isUrlValid} />
+                <SingleSetting settingsKey="imageSmallURL" label="Small picture click link" isValid={isUrlValid} placeholder="https://…" />
             </Fold>
 
-            <Fold title="Buttons">
+            <Fold title="Buttons others can click">
+                <Text variant="text-xs/normal" className={cl("hint")}>
+                    You won’t see these on your own profile. Other people will.
+                </Text>
                 <PairSetting data={[
-                    { settingsKey: "buttonOneText", label: "Button 1 Text", isValid: makeValidator(31) },
-                    { settingsKey: "buttonOneURL", label: "Button 1 URL", isValid: isUrlValid },
+                    { settingsKey: "buttonOneText", label: "Button 1 label", isValid: makeValidator(31), placeholder: "Open site" },
+                    { settingsKey: "buttonOneURL", label: "Button 1 link", isValid: isUrlValid, placeholder: "https://…" },
                 ]} />
                 <PairSetting data={[
-                    { settingsKey: "buttonTwoText", label: "Button 2 Text", isValid: makeValidator(31) },
-                    { settingsKey: "buttonTwoURL", label: "Button 2 URL", isValid: isUrlValid },
+                    { settingsKey: "buttonTwoText", label: "Button 2 label", isValid: makeValidator(31) },
+                    { settingsKey: "buttonTwoURL", label: "Button 2 link", isValid: isUrlValid, placeholder: "https://…" },
                 ]} />
             </Fold>
 
-            <Fold title="Advanced">
+            <Fold title="More options">
                 <PairSetting data={[
                     {
                         settingsKey: "partySize",
-                        label: "Party Size",
+                        label: "Party size",
                         transform: parseNumber,
                         isValid: isNumberValid,
                         disabled: s.type !== ActivityType.PLAYING,
                     },
                     {
                         settingsKey: "partyMaxSize",
-                        label: "Maximum Party Size",
+                        label: "Party max",
                         transform: parseNumber,
                         isValid: isNumberValid,
                         disabled: s.type !== ActivityType.PLAYING,
                     },
                 ]} />
-                <SingleSetting settingsKey="partyId" label="Party ID" />
+                <SingleSetting settingsKey="partyId" label="Party ID" hint="Optional. Leave blank unless you know you need it." />
                 <SelectSetting
                     settingsKey="timestampMode"
-                    label="Timestamp Mode"
+                    label="Timer"
                     options={[
-                        { label: "None", value: TimestampMode.NONE },
-                        { label: "Since Discord open", value: TimestampMode.NOW },
-                        { label: "Same as your current time", value: TimestampMode.TIME, default: true },
-                        { label: "Custom", value: TimestampMode.CUSTOM },
+                        { label: "No timer", value: TimestampMode.NONE },
+                        { label: "Elapsed since Discord opened", value: TimestampMode.NOW },
+                        { label: "Elapsed since midnight", value: TimestampMode.TIME, default: true },
+                        { label: "Custom timestamps", value: TimestampMode.CUSTOM },
                     ]}
                 />
                 <PairSetting data={[
                     {
                         settingsKey: "startTime",
-                        label: "Start Timestamp (ms)",
+                        label: "Start time (ms)",
                         transform: parseNumber,
                         isValid: isNumberValid,
                         disabled: s.timestampMode !== TimestampMode.CUSTOM,
                     },
                     {
                         settingsKey: "endTime",
-                        label: "End Timestamp (ms)",
+                        label: "End time (ms)",
                         transform: parseNumber,
                         isValid: isNumberValid,
                         disabled: s.timestampMode !== TimestampMode.CUSTOM,

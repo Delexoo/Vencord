@@ -5,347 +5,481 @@
  */
 
 import { definePluginSettings } from "@api/Settings";
-import { debounce } from "@shared/debounce";
+import { Heading } from "@components/Heading";
 import { classNameFactory } from "@utils/css";
 import definePlugin, { OptionType } from "@utils/types";
-import { UserStore } from "@webpack/common";
+import { GuildMemberStore, MessageStore, Text, TextInput, UserStore } from "@webpack/common";
 
 import { Delexo } from "../_delexo/author";
 import managedStyle from "./style.css?managed";
 
-const cl = classNameFactory("vc-nickname-");
-const MARK = "data-vc-nickname";
-const ORIG = "data-vc-nickname-orig";
 const MAX_LEN = 32;
-const SKIP = "#vc-last-online-profile-host, .vc-profile-button-host, input, textarea, [contenteditable='true']";
-
-const PROFILE_ROOT = [
-    '[class*="userProfileModal"]',
-    '[class*="userProfileOuter"]',
-    '[class*="userPopoutOuter"]',
-    '[class*="userProfileInner"]',
-    '[class*="profilePanel"]'
+const SNOWFLAKE = /^\d{16,22}$/;
+const SKIP = [
+    "input",
+    "textarea",
+    "select",
+    "code",
+    "pre",
+    "script",
+    "style",
+    "[contenteditable='true']",
+    ".vc-nickname-panel",
+    ".vc-profile-button-host",
+    "[id^='message-content-']",
+    "[class*='messageContent']",
+    "[class*='repliedTextContent']",
+    "[class*='embedDescription']"
 ].join(", ");
 
-const ACCOUNT_ROOT = 'section[class*="panels"]';
-
-const NAME_SEL = [
-    "h1",
-    "h2",
-    "h3",
-    "[class*='nickname']",
-    "[class*='displayName']",
-    "[class*='userTagUsername']",
-    "[class*='userTag']",
-    "[class*='nameTag']",
-    "[class*='username']",
-    "[class*='handle']"
-].join(", ");
+const cl = classNameFactory("vc-nickname-");
 
 type NameKind = "display" | "handle";
 
 const settings = definePluginSettings({
+    panel: {
+        type: OptionType.COMPONENT,
+        component: SettingsPanel
+    },
     displayName: {
         type: OptionType.STRING,
-        description: "Display name shown on your profile. Leave empty to keep your real display name.",
+        description: "Replaces your display name everywhere.",
         default: "You",
-        placeholder: "You",
-        onChange() { namesCache = null; scheduleTick(); }
+        hidden: true,
+        onChange() { applyLive(); }
     },
     handle: {
         type: OptionType.STRING,
-        description: "Handle shown on your profile. Leave empty to keep your real username.",
+        description: "Replaces your username everywhere.",
         default: "You",
-        placeholder: "You",
-        onChange() { namesCache = null; scheduleTick(); }
+        hidden: true,
+        onChange() { applyLive(); }
     }
 });
 
+type RealNames = { username: string; globalName: string; };
+
+const hooked = new WeakSet<object>();
+const hookedUsers: any[] = [];
+const realByUser = new WeakMap<object, RealNames>();
+const originalText = new WeakMap<Text, string>();
+const touched = new Set<Text>();
+
+let running = false;
+let real: RealNames = { username: "", globalName: "" };
 let observer: MutationObserver | null = null;
-let profileObserver: MutationObserver | null = null;
-let watchedRoot: HTMLElement | null = null;
 let applying = false;
-let namesCache: Set<string> | null = null;
-
-const PROFILE_OPEN_RE = /userProfileModal|userProfileOuter|userPopoutOuter|profilePanel/;
-
-function norm(el: Element | null) {
-    return (el?.textContent || "").replace(/\s+/g, " ").trim();
-}
-
-function stripAt(text: string) {
-    return text.replace(/^@/, "").trim();
-}
-
-function ownUser() {
-    return UserStore.getCurrentUser();
-}
+let liveRaf = 0;
+let origGetUser: ((id: string) => any) | null = null;
+let origGetCurrentUser: (() => any) | null = null;
+let origGetNick: ((guildId: string, userId: string) => string | null) | null = null;
 
 function desired(kind: NameKind) {
+    if (!running) return "";
     const raw = kind === "display" ? settings.store.displayName : settings.store.handle;
     return String(raw ?? "").trim().slice(0, MAX_LEN);
 }
 
-function ownNames() {
-    if (namesCache) return namesCache;
-    const me = ownUser();
-    const names = new Set<string>();
-    if (me?.username) names.add(me.username);
-    if (me?.globalName) names.add(me.globalName);
+function setDesired(kind: NameKind, value: string) {
+    const next = String(value ?? "").slice(0, MAX_LEN);
+    if (kind === "display") settings.store.displayName = next;
+    else settings.store.handle = next;
+    applyLive();
+}
+
+function sameName(a: string, b: string) {
+    return Boolean(a && b && a.toLowerCase() === b.toLowerCase());
+}
+
+function isHandleToken(token: string) {
+    const inner = token.trim();
+    if (!inner) return false;
+    const bare = inner.replace(/^@/, "");
+    return sameName(bare, real.username) || sameName(bare, desired("handle"));
+}
+
+function isDisplayToken(token: string) {
+    const inner = token.trim();
+    if (!inner || inner.startsWith("@")) return false;
+    return sameName(inner, real.globalName) || sameName(inner, desired("display"));
+}
+
+function isNameCandidate(text: string) {
+    const inner = text.trim();
+    if (!inner || inner.length > MAX_LEN + 1) return false;
+    return isHandleToken(inner) || isDisplayToken(inner);
+}
+
+function paintExact(text: string) {
+    const lead = text.match(/^\s*/)?.[0] ?? "";
+    const trail = text.match(/\s*$/)?.[0] ?? "";
+    const inner = text.slice(lead.length, text.length - trail.length);
+    if (!inner) return text;
+
     const display = desired("display");
     const handle = desired("handle");
-    if (display) names.add(display);
-    if (handle) names.add(handle);
-    namesCache = names;
-    return names;
-}
-
-function isOwnLabel(text: string) {
-    const t = stripAt(text);
-    if (!t || t.length > 40) return false;
-    const names = ownNames();
-    if (names.has(t)) return true;
-    const lower = t.toLowerCase();
-    for (const name of names) {
-        if (name.toLowerCase() === lower) return true;
+    if (inner.startsWith("@")) {
+        return lead + (handle ? `@${handle}` : inner) + trail;
     }
-    return false;
+    if (real.globalName && sameName(inner, real.globalName)) {
+        return lead + (display || inner) + trail;
+    }
+    if (real.username && sameName(inner, real.username)) {
+        return lead + (handle || inner) + trail;
+    }
+    if (display && sameName(inner, display)) return lead + display + trail;
+    if (handle && sameName(inner, handle)) return lead + handle + trail;
+    return text;
 }
 
-function findUserIdNear(el: Element | null): string | null {
-    let cur: Element | null = el;
-    for (let i = 0; i < 50 && cur; i++) {
-        const fiberKey = Object.keys(cur).find(k =>
-            k.startsWith("__reactFiber$") || k.startsWith("__reactInternalInstance$")
-        );
-        let fiber: any = fiberKey ? (cur as any)[fiberKey] : null;
-        for (let d = 0; d < 45 && fiber; d++, fiber = fiber.return) {
-            const p = fiber.memoizedProps || fiber.pendingProps || {};
-            if (p.user?.id) return String(p.user.id);
-            if (p.userId) return String(p.userId);
-            if (typeof p.id === "string" && /^\d{16,20}$/.test(p.id) && p.username) return p.id;
-        }
-        cur = cur.parentElement;
+function skipNode(node: Node | null) {
+    if (!node) return true;
+    const el = node instanceof Element ? node : node.parentElement;
+    if (!el) return true;
+    if (el.closest(SKIP)) return true;
+    const tag = el.tagName;
+    return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || tag === "CODE" || tag === "PRE" || tag === "SCRIPT" || tag === "STYLE";
+}
+
+function attrUserId(el: Element): string | null {
+    for (const name of ["data-user-id", "data-userid", "data-author-id"]) {
+        const value = el.getAttribute(name);
+        if (value && SNOWFLAKE.test(value)) return value;
+    }
+    const listId = el.getAttribute("data-list-item-id") || "";
+    const member = listId.match(/members-(\d{16,22})/);
+    if (member) return member[1];
+    const href = el.getAttribute("href") || "";
+    const userHref = href.match(/\/users\/(\d{16,22})/);
+    if (userHref) return userHref[1];
+    return null;
+}
+
+function fiberUserId(el: Element): string | null {
+    const fiberKey = Object.keys(el).find(k =>
+        k.startsWith("__reactFiber$") || k.startsWith("__reactInternalInstance$")
+    );
+    let fiber: any = fiberKey ? (el as any)[fiberKey] : null;
+    for (let depth = 0; depth < 30 && fiber; depth++, fiber = fiber.return) {
+        const p = fiber.memoizedProps || fiber.pendingProps || {};
+        const user = p.user ?? p.message?.author ?? p.participant?.user;
+        if (user?.id && SNOWFLAKE.test(String(user.id))) return String(user.id);
+        if (p.userId && SNOWFLAKE.test(String(p.userId))) return String(p.userId);
+        if (p.authorId && SNOWFLAKE.test(String(p.authorId))) return String(p.authorId);
+        if (typeof p.id === "string" && SNOWFLAKE.test(p.id) && (p.username || p.globalName)) return p.id;
     }
     return null;
 }
 
-function isNestedProfile(el: HTMLElement) {
-    const parent = el.parentElement?.closest(PROFILE_ROOT);
-    return parent != null && parent !== el;
+function ownerUserId(node: Node): string | null {
+    const start = node instanceof Element ? node : node.parentElement;
+    if (!start) return null;
+    let cur: Element | null = start;
+    for (let i = 0; i < 40 && cur; i++, cur = cur.parentElement) {
+        const id = attrUserId(cur) ?? fiberUserId(cur);
+        if (id) return id;
+    }
+    return null;
 }
 
-function isOwnRoot(el: HTMLElement) {
-    const me = ownUser()?.id;
+function isOwnUserNode(node: Node) {
+    const me = String(ownId() ?? "");
     if (!me) return false;
-    const id = findUserIdNear(el);
-    if (id === me) return true;
-    if (id && id !== me) return false;
-    return [...el.querySelectorAll<HTMLElement>(NAME_SEL)].some(node => isOwnLabel(norm(node)));
+    return ownerUserId(node) === me;
 }
 
-function collectRoots() {
-    const out: HTMLElement[] = [];
-    const seen = new Set<HTMLElement>();
-    const add = (el: HTMLElement | null) => {
-        if (!el || seen.has(el) || !isOwnRoot(el)) return;
-        seen.add(el);
-        out.push(el);
-    };
-
-    for (const el of document.querySelectorAll<HTMLElement>(PROFILE_ROOT)) {
-        if (isNestedProfile(el)) continue;
-        add(el);
-    }
-    for (const el of document.querySelectorAll<HTMLElement>(ACCOUNT_ROOT)) add(el);
-    return out;
+function forgetNode(node: Text) {
+    originalText.delete(node);
+    touched.delete(node);
 }
 
-function isJunk(text: string) {
-    return /^(activity|mutual|message|note|member since|friends since|edit profile|view full profile|bio|pronouns)$/i.test(text);
-}
-
-function skipEl(el: HTMLElement) {
-    if (el.closest(SKIP)) return true;
-    if (/clanTag|guildTag|badge/i.test(el.className)) return true;
-    return false;
-}
-
-function isLeafName(el: HTMLElement) {
-    for (const child of el.querySelectorAll<HTMLElement>(NAME_SEL)) {
-        if (child !== el && isOwnLabel(norm(child))) return false;
-    }
-    return true;
-}
-
-function classify(el: HTMLElement): NameKind | null {
-    if (skipEl(el) || !isLeafName(el)) return null;
-    const marked = el.getAttribute(MARK);
-    if (marked === "display" || marked === "handle") return marked;
-    const text = norm(el);
-    if (!text || text.length > 40 || isJunk(text) || !isOwnLabel(text)) return null;
-
-    const cls = `${el.className} ${el.parentElement?.className ?? ""}`;
-    if (/userTagUsername|userTag|nameTag|handle/i.test(cls) || text.startsWith("@")) return "handle";
-    if (/nickname|displayName/i.test(cls) || /^(h1|h2|h3)$/i.test(el.tagName)) return "display";
-    if (/username/i.test(cls)) return "handle";
-    return "display";
-}
-
-function score(el: HTMLElement, kind: NameKind) {
-    let n = 1;
-    const cls = el.className;
-    if (kind === "display") {
-        if (/^(h1|h2|h3)$/i.test(el.tagName)) n += 80;
-        if (/nickname|displayName/i.test(cls)) n += 60;
-    } else {
-        if (/userTagUsername|userTag|nameTag|handle|username/i.test(cls)) n += 60;
-        if (norm(el).startsWith("@")) n += 20;
-    }
-    return n;
-}
-
-function pick(root: HTMLElement, kind: NameKind, used: Set<HTMLElement>) {
-    let best: HTMLElement | null = null;
-    let bestScore = 0;
-    for (const el of root.querySelectorAll<HTMLElement>(NAME_SEL)) {
-        if (used.has(el) || classify(el) !== kind) continue;
-        const n = score(el, kind);
-        if (n > bestScore) {
-            best = el;
-            bestScore = n;
-        }
-    }
-    return best;
-}
-
-function nextText(kind: NameKind, orig: string) {
-    switch (kind) {
-        case "display":
-            return desired("display") || orig;
-        case "handle": {
-            const want = desired("handle");
-            if (!want) return orig;
-            return orig.trim().startsWith("@") ? `@${want}` : want;
-        }
-        default: {
-            const _never: never = kind;
-            return orig;
-        }
-    }
-}
-
-function apply(el: HTMLElement, kind: NameKind) {
-    if (!el.hasAttribute(ORIG)) el.setAttribute(ORIG, el.textContent ?? "");
-    const orig = el.getAttribute(ORIG) ?? "";
-    const next = nextText(kind, orig);
-    el.setAttribute(MARK, kind);
-    el.classList.add(cl(kind));
-    if ((el.textContent ?? "") !== next) el.textContent = next;
-}
-
-function alreadyApplied() {
-    const marked = document.querySelectorAll<HTMLElement>(`[${MARK}]`);
-    if (!marked.length) return false;
-    for (const el of marked) {
-        if (!el.isConnected) return false;
-        const kind = el.getAttribute(MARK);
-        if (kind !== "display" && kind !== "handle") return false;
-        const orig = el.getAttribute(ORIG) ?? "";
-        if ((el.textContent ?? "") !== nextText(kind, orig)) return false;
-    }
-    return true;
-}
-
-function watchProfileRoot(root: HTMLElement | null) {
-    if (root === watchedRoot && profileObserver) return;
-    profileObserver?.disconnect();
-    profileObserver = null;
-    watchedRoot = root;
-    if (!root) return;
-    profileObserver = new MutationObserver(records => {
-        for (const rec of records) {
-            if (rec.target instanceof Element && rec.target.closest(`[${MARK}], ${SKIP}`)) continue;
-            scheduleTick();
-            return;
-        }
-    });
-    profileObserver.observe(root, { childList: true, subtree: true });
-}
-
-function tick() {
-    if (applying) return;
-    namesCache = null;
-    if (alreadyApplied()) {
-        if (!profileObserver) {
-            const marked = document.querySelector<HTMLElement>(`[${MARK}]`);
-            watchProfileRoot(
-                marked?.closest<HTMLElement>(PROFILE_ROOT)
-                ?? marked?.closest<HTMLElement>(ACCOUNT_ROOT)
-                ?? null
-            );
-        }
+function rewriteText(node: Text) {
+    if (skipNode(node)) return;
+    const current = node.nodeValue ?? "";
+    const stored = originalText.get(node);
+    if (!isNameCandidate(current) && !(stored != null && isNameCandidate(stored))) return;
+    if (!isOwnUserNode(node)) {
+        forgetNode(node);
         return;
     }
+
+    const paintedStored = stored != null ? paintExact(stored) : "";
+    const base = stored != null && (current === stored || current === paintedStored)
+        ? stored
+        : current;
+    originalText.set(node, base);
+    touched.add(node);
+    const next = paintExact(base);
+    if (node.nodeValue !== next) node.nodeValue = next;
+}
+
+function walk(root: Node | null) {
+    if (!root || skipNode(root)) return;
+    if (root.nodeType === Node.TEXT_NODE) {
+        rewriteText(root as Text);
+        return;
+    }
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+            return skipNode(node) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+        }
+    });
+    const nodes: Text[] = [];
+    let current: Node | null;
+    while ((current = walker.nextNode())) nodes.push(current as Text);
+    for (const node of nodes) rewriteText(node);
+}
+
+function pruneTouched() {
+    for (const node of [...touched]) {
+        if (!node.isConnected) {
+            touched.delete(node);
+            originalText.delete(node);
+        }
+    }
+}
+
+function restoreTouched() {
     applying = true;
-    profileObserver?.disconnect();
     try {
-        const used = new Set<HTMLElement>();
-        let watch: HTMLElement | null = null;
-        for (const root of collectRoots()) {
-            watch = watch ?? root;
-            const display = pick(root, "display", used);
-            if (display) used.add(display);
-            const handle = pick(root, "handle", used);
-            if (handle) used.add(handle);
-            if (display && handle && display !== handle) {
-                apply(display, "display");
-                apply(handle, "handle");
+        for (const node of [...touched]) {
+            if (!isOwnUserNode(node)) {
+                forgetNode(node);
                 continue;
             }
-            const only = display || handle;
-            if (!only) continue;
-            if (desired("display")) apply(only, "display");
-            else if (desired("handle")) apply(only, "handle");
+            const orig = originalText.get(node);
+            if (orig != null && node.nodeValue !== orig) node.nodeValue = orig;
         }
-        watchProfileRoot(watch);
     } finally {
         applying = false;
-        if (watchedRoot) watchProfileRoot(watchedRoot);
     }
 }
 
-const scheduleTick = debounce(() => {
-    try { tick(); } catch { /* ignore */ }
-}, 120);
-
-function didOpenOrCloseProfile(records: MutationRecord[]) {
-    for (const rec of records) {
-        for (const node of rec.addedNodes) {
-            if (node instanceof HTMLElement && PROFILE_OPEN_RE.test(node.className)) return true;
+function scanAll() {
+    if (!running) return;
+    pruneTouched();
+    applying = true;
+    observer?.disconnect();
+    try {
+        for (const node of [...touched]) {
+            if (!isOwnUserNode(node)) forgetNode(node);
         }
-        for (const node of rec.removedNodes) {
-            if (node instanceof HTMLElement && PROFILE_OPEN_RE.test(node.className)) return true;
-        }
+        walk(document.body);
+    } finally {
+        applying = false;
+        startObserver();
     }
-    return false;
 }
 
-function restore(el: HTMLElement) {
-    const orig = el.getAttribute(ORIG);
-    if (orig != null) el.textContent = orig;
-    el.removeAttribute(MARK);
-    el.removeAttribute(ORIG);
-    el.classList.remove(cl("display"), cl("handle"));
+function scanNodes(nodes: Iterable<Node>) {
+    if (!running) return;
+    applying = true;
+    observer?.disconnect();
+    try {
+        for (const node of nodes) walk(node);
+    } finally {
+        applying = false;
+        startObserver();
+    }
 }
 
-function restoreAll() {
-    for (const el of document.querySelectorAll<HTMLElement>(`[${MARK}]`)) restore(el);
+function refreshUsers() {
+    try { (UserStore as { emitChange?: () => void; }).emitChange?.(); } catch { /* ignore */ }
+    try { (MessageStore as { emitChange?: () => void; }).emitChange?.(); } catch { /* ignore */ }
+    try { (GuildMemberStore as { emitChange?: () => void; }).emitChange?.(); } catch { /* ignore */ }
+}
+
+function applyLive() {
+    if (!running) return;
+    if (liveRaf) cancelAnimationFrame(liveRaf);
+    refreshUsers();
+    liveRaf = requestAnimationFrame(() => {
+        liveRaf = 0;
+        if (!running) return;
+        try { scanAll(); } catch { /* ignore */ }
+        refreshUsers();
+    });
+}
+
+let pending: Node[] = [];
+let pendingTimer = 0;
+
+function queueNodes(nodes: Node[]) {
+    pending.push(...nodes);
+    if (pendingTimer) return;
+    pendingTimer = requestAnimationFrame(() => {
+        pendingTimer = 0;
+        const batch = pending;
+        pending = [];
+        try { scanNodes(batch); } catch { /* ignore */ }
+    });
+}
+
+function startObserver() {
+    observer?.disconnect();
+    if (!running) return;
+    observer = new MutationObserver(records => {
+        if (applying) return;
+        const nodes: Node[] = [];
+        for (const rec of records) {
+            if (rec.type === "characterData") {
+                const parent = rec.target.parentNode;
+                if (parent && !skipNode(parent)) nodes.push(parent);
+                continue;
+            }
+            for (const node of rec.addedNodes) {
+                if (!skipNode(node)) nodes.push(node);
+            }
+        }
+        if (nodes.length) queueNodes(nodes);
+    });
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+}
+
+function ownId() {
+    return origGetCurrentUser ? origGetCurrentUser()?.id : UserStore.getCurrentUser()?.id;
+}
+
+function isOwnUser(user: any) {
+    const me = ownId();
+    return Boolean(me && user && String(user.id) === String(me));
+}
+
+function hookUser(user: any) {
+    if (!running || !isOwnUser(user)) return;
+    if (hooked.has(user)) return;
+
+    const box: RealNames = {
+        username: String(user.username ?? ""),
+        globalName: String(user.globalName ?? "")
+    };
+    if (box.username) real.username = box.username;
+    if (box.globalName) real.globalName = box.globalName;
+    realByUser.set(user, box);
+    hooked.add(user);
+    hookedUsers.push(user);
+
+    try {
+        Object.defineProperty(user, "username", {
+            configurable: true,
+            enumerable: true,
+            get() { return (running && desired("handle")) || box.username; },
+            set(value: string) {
+                const v = String(value ?? "");
+                if (!v || v === desired("handle")) return;
+                box.username = v;
+                real.username = v;
+            }
+        });
+        Object.defineProperty(user, "globalName", {
+            configurable: true,
+            enumerable: true,
+            get() { return (running && desired("display")) || box.globalName || null; },
+            set(value: string) {
+                const v = String(value ?? "");
+                if (!v || v === desired("display")) return;
+                box.globalName = v;
+                real.globalName = v;
+            }
+        });
+    } catch {
+        // some user records are frozen
+    }
+}
+
+function unhookUser(user: any) {
+    const box = realByUser.get(user);
+    if (!box) return;
+    try {
+        Object.defineProperty(user, "username", {
+            configurable: true,
+            enumerable: true,
+            writable: true,
+            value: box.username
+        });
+        Object.defineProperty(user, "globalName", {
+            configurable: true,
+            enumerable: true,
+            writable: true,
+            value: box.globalName || null
+        });
+    } catch {
+        try {
+            user.username = box.username;
+            user.globalName = box.globalName || null;
+        } catch { /* ignore */ }
+    }
+    hooked.delete(user);
+    realByUser.delete(user);
+}
+
+function unhookAll() {
+    for (const user of hookedUsers) unhookUser(user);
+    hookedUsers.length = 0;
+}
+
+function patchStores() {
+    origGetUser = UserStore.getUser.bind(UserStore);
+    origGetCurrentUser = UserStore.getCurrentUser.bind(UserStore);
+    origGetNick = GuildMemberStore.getNick.bind(GuildMemberStore);
+    UserStore.getUser = ((id: string) => {
+        const user = origGetUser!(id);
+        if (isOwnUser(user)) hookUser(user);
+        return user;
+    }) as typeof UserStore.getUser;
+    UserStore.getCurrentUser = (() => {
+        const user = origGetCurrentUser!();
+        hookUser(user);
+        return user;
+    }) as typeof UserStore.getCurrentUser;
+    GuildMemberStore.getNick = ((guildId: string, userId: string) => {
+        const nick = origGetNick!(guildId, userId);
+        if (!running || String(userId) !== String(ownId() ?? "")) return nick;
+        return desired("display") || nick;
+    }) as typeof GuildMemberStore.getNick;
+}
+
+function unpatchStores() {
+    if (origGetUser) UserStore.getUser = origGetUser as typeof UserStore.getUser;
+    if (origGetCurrentUser) UserStore.getCurrentUser = origGetCurrentUser as typeof UserStore.getCurrentUser;
+    if (origGetNick) GuildMemberStore.getNick = origGetNick as typeof GuildMemberStore.getNick;
+    origGetUser = null;
+    origGetCurrentUser = null;
+    origGetNick = null;
+}
+
+function SettingsPanel() {
+    settings.use(["displayName", "handle"] as never);
+    return (
+        <div className={cl("panel")}>
+            <Text variant="text-sm/normal" className={cl("lede")}>
+                Only your account is renamed. Names update as you type. Leave a field empty to keep the real one.
+            </Text>
+            <div className={cl("field")}>
+                <Heading tag="h5">Display name</Heading>
+                <TextInput
+                    placeholder="You"
+                    value={String(settings.store.displayName ?? "")}
+                    maxLength={MAX_LEN}
+                    onChange={value => setDesired("display", value)}
+                />
+            </div>
+            <div className={cl("field")}>
+                <Heading tag="h5">Username</Heading>
+                <TextInput
+                    placeholder="You"
+                    value={String(settings.store.handle ?? "")}
+                    maxLength={MAX_LEN}
+                    onChange={value => setDesired("handle", value)}
+                />
+            </div>
+        </div>
+    );
 }
 
 export default definePlugin({
     name: "Nickname",
-    description: "Replace your display name and handle on your own profile. Both optional; both default to You.",
+    description: "Replace your display name and username everywhere in Discord. Updates live as you type.",
     authors: [Delexo],
     tags: ["Appearance", "Fun"],
     searchTerms: ["handle", "username", "display name", "you", "profile"],
@@ -354,19 +488,29 @@ export default definePlugin({
     managedStyle,
 
     start() {
-        scheduleTick();
-        observer = new MutationObserver(records => {
-            if (didOpenOrCloseProfile(records)) scheduleTick();
-        });
-        observer.observe(document.body, { childList: true, subtree: true });
+        running = true;
+        patchStores();
+        hookUser(origGetCurrentUser?.() ?? UserStore.getCurrentUser());
+        startObserver();
+        applyLive();
     },
 
     stop() {
+        running = false;
+        if (liveRaf) cancelAnimationFrame(liveRaf);
+        liveRaf = 0;
+        if (pendingTimer) cancelAnimationFrame(pendingTimer);
+        pendingTimer = 0;
         observer?.disconnect();
         observer = null;
-        profileObserver?.disconnect();
-        profileObserver = null;
-        watchedRoot = null;
-        restoreAll();
+        unhookAll();
+        unpatchStores();
+        restoreTouched();
+        touched.clear();
+        refreshUsers();
+        requestAnimationFrame(() => {
+            restoreTouched();
+            refreshUsers();
+        });
     }
 });

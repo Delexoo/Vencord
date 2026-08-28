@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Vencord, a Discord client mod
  * Copyright (c) 2026 Delexo contributors
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -7,8 +7,6 @@
 import { definePluginSettings } from "@api/Settings";
 import { getUserSettingLazy } from "@api/UserSettings";
 import { ErrorCard } from "@components/ErrorCard";
-import { ExpandableSection } from "@components/ExpandableCard";
-import { Flex } from "@components/Flex";
 import { Link } from "@components/Link";
 import { isTruthy } from "@utils/guards";
 import { Margins } from "@utils/margins";
@@ -18,7 +16,7 @@ import definePlugin, { OptionType } from "@utils/types";
 import { Activity } from "@vencord/discord-types";
 import { ActivityType } from "@vencord/discord-types/enums";
 import { findByCodeLazy, findComponentByCodeLazy } from "@webpack";
-import { ApplicationAssetUtils, Button, FluxDispatcher, Forms, UserStore } from "@webpack/common";
+import { ApplicationAssetUtils, Button, Clickable, FluxDispatcher, Forms, UserStore, useState } from "@webpack/common";
 
 import { Delexo } from "../_delexo/author";
 import { resolveTemplate, TimestampMode } from "./markdown";
@@ -112,8 +110,10 @@ export async function createActivity(): Promise<Activity | undefined> {
 
         if (!appName) return;
 
-        const details = resolveTemplate(store.details, activeName);
-        const state = resolveTemplate(store.state, activeName);
+        const me = UserStore.getCurrentUser();
+        const userName = me?.globalName || me?.username;
+        const details = resolveTemplate(store.details, activeName, userName);
+        const state = resolveTemplate(store.state, activeName, userName);
 
         const activity: Activity = {
             application_id: appID || "0",
@@ -222,11 +222,36 @@ export async function setRpc(disable?: boolean) {
     }
 }
 
+function SetupTips() {
+    const [open, setOpen] = useState(false);
+    return (
+        <div className="vc-arp-tips">
+            <Clickable className="vc-arp-tips-toggle" onClick={() => setOpen(v => !v)}>
+                <span>Setup tips</span>
+                <span className="vc-arp-tips-caret" aria-hidden>{open ? "▾" : "▸"}</span>
+            </Clickable>
+            {open && (
+                <div className="vc-arp-tips-body">
+                    <Forms.FormText>
+                        Optional <Link href="https://discord.com/developers/applications">App ID</Link> from the Developer Portal if you upload images there. Otherwise paste a direct <Link href="https://imgur.com">Imgur</Link> image address.
+                    </Forms.FormText>
+                    <Forms.FormText>
+                        Statuses are saved as files in Documents → AdvancedRichPresence. You won’t see your own buttons; other people will.
+                    </Forms.FormText>
+                    <Forms.FormText>
+                        In Line 1 or Line 2 you can type {"{user}"} (your name), {"{time}"}, {"{date}"}, or {"{preset}"}.
+                    </Forms.FormText>
+                </div>
+            )}
+        </div>
+    );
+}
+
 export default definePlugin({
     name: "AdvancedRichPresence",
-    description: "CustomRPC with Markdown presets you can create, update, duplicate, and delete",
+    description: "Show a custom status on your profile. Save different statuses and switch between them.",
     tags: ["Activity", "Customisation"],
-    searchTerms: ["rpc", "rich presence", "preset", "markdown", "harvard", "customrpc", "delexo"],
+    searchTerms: ["rpc", "rich presence", "preset", "markdown", "customrpc", "delexo", "status"],
     authors: [Delexo],
     dependencies: ["UserSettingsAPI"],
     requiresRestart: false,
@@ -236,10 +261,12 @@ export default definePlugin({
     async start() {
         try {
             const list = await refreshPresets();
-            if (settings.store.activeFile)
-                await loadPresetIntoStore(settings.store, settings.store.activeFile);
-            else if (list[0] && !settings.store.appName)
+            const active = settings.store.activeFile;
+            if (active && await loadPresetIntoStore(settings.store, active)) {
+                /* keep current */
+            } else if (list[0] && !settings.store.appName) {
                 await loadPresetIntoStore(settings.store, list[0].fileName);
+            }
         } catch (e) {
             console.error("[AdvancedRichPresence] preset load failed", e);
         }
@@ -270,47 +297,32 @@ export default definePlugin({
                 {!gameActivityEnabled && (
                     <ErrorCard
                         className={classes(Margins.top16, Margins.bottom16)}
-                        style={{ padding: "1em" }}
+                        style={{ padding: "0.75em 1em" }}
                     >
-                        <Forms.FormTitle>Notice</Forms.FormTitle>
-                        <Forms.FormText>Activity Sharing isn't enabled, people won't be able to see your custom rich presence!</Forms.FormText>
-
+                        <Forms.FormTitle>Activity sharing is off</Forms.FormTitle>
+                        <Forms.FormText>Turn it on so friends can see this status on your profile.</Forms.FormText>
                         <Button
-                            color={Button.Colors.TRANSPARENT}
+                            color={Button.Colors.BRAND}
+                            size={Button.Sizes.SMALL}
                             className={Margins.top8}
                             onClick={() => ShowCurrentGame.updateSetting(true)}
                         >
-                            Enable
+                            Turn on
                         </Button>
                     </ErrorCard>
                 )}
 
-                <div style={{ width: "284px", ...profileThemeStyle, marginTop: 8, borderRadius: 8, background: "var(--background-mod-muted)" }}>
-                    {activity && <ActivityView
-                        activity={activity}
-                        user={UserStore.getCurrentUser()}
-                        currentUser={UserStore.getCurrentUser()}
-                    />}
-                </div>
+                {activity && (
+                    <div className="vc-arp-live-preview" style={{ ...profileThemeStyle }}>
+                        <ActivityView
+                            activity={activity}
+                            user={UserStore.getCurrentUser()}
+                            currentUser={UserStore.getCurrentUser()}
+                        />
+                    </div>
+                )}
 
-                <ExpandableSection
-                    className={classes(Margins.top8, "vc-arp-fold")}
-                    renderContent={() => (
-                        <Flex flexDirection="column" gap="8px">
-                            <Forms.FormText>
-                                Create an app in the <Link href="https://discord.com/developers/applications">Developer Portal</Link> for an Application ID. Upload images there for asset keys, or use a direct <Link href="https://imgur.com">Imgur</Link> link (right-click → Copy image address).
-                            </Forms.FormText>
-                            <Forms.FormText>
-                                Presets are <code>.md</code> files in Documents → AdvancedRichPresence → presets. You cannot see your own buttons; others can. Fancy unicode fonts can hide the activity — use normal letters.
-                            </Forms.FormText>
-                            <Forms.FormText>
-                                Text lines accept {"{time}"}, {"{date}"}, and {"{preset}"}.
-                            </Forms.FormText>
-                        </Flex>
-                    )}
-                >
-                    Setup tips
-                </ExpandableSection>
+                <SetupTips />
             </>
         );
     }

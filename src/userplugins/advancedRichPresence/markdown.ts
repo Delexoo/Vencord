@@ -170,40 +170,16 @@ export function applyFields(target: PresenceFields, fields: PresenceFields) {
     }
 }
 
-export function resolveTemplate(text: string | undefined, presetName?: string): string | undefined {
+export function resolveTemplate(text: string | undefined, presetName?: string, userName?: string): string | undefined {
     if (!text) return text;
     try {
         const now = new Date();
         return text
             .split("{time}").join(now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))
             .split("{date}").join(now.toLocaleDateString())
-            .split("{preset}").join(presetName || "");
+            .split("{preset}").join(presetName || "")
+            .split("{user}").join(userName || "");
     } catch {
         return text;
     }
-}
-
-/** Bundled starter preset (formerly Harvard Online). */
-export function harvardOnlineSeed(): PresencePreset {
-    return {
-        id: "harvard-online",
-        name: "Harvard Online",
-        fileName: "harvard-online.md",
-        updatedAt: Date.now(),
-        appID: "1260139887504392203",
-        appName: "Harvard Online",
-        details: "Cybersecurity: Managing Risk in the Information Age",
-        detailsURL: "https://harvardonline.harvard.edu/",
-        type: ActivityType.PLAYING,
-        timestampMode: TimestampMode.TIME,
-        imageBig:
-            "https://static-prod.logosoftwear.com/img/applications/library/design-tips/the-meanings-of-20-university-logos/harvard-logo.jpg",
-        imageBigTooltip: "Playing Harvard Online on Windows 11",
-        imageSmall:
-            "https://media3.giphy.com/media/v1.Y2lkPTZjMDliOTUyNml6b2J2NnVvdWczNGlrZmIzcTZkOWNkczU4eHc5dTVxMmd4aHphciZlcD12MV9zdGlja2Vyc19zZWFyY2gmY3Q9cw/ymOQcf85Q5zrkBrhPM/source.gif",
-        imageSmallTooltip: "Verified",
-        buttonOneText: "Learn More",
-        buttonOneURL: "https://harvardonline.harvard.edu/",
-        notes: "Starter preset migrated from the Harvard Online plugin.\nEdit or duplicate this .md file anytime."
-    };
 }

@@ -1,0 +1,366 @@
+/*
+ * Vencord, a Discord client mod
+ * Copyright (c) 2026 Delexo contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+import { Constants, FluxDispatcher, RestAPI, UserProfileStore, UserStore } from "@webpack/common";
+
+import type { ShareState } from "../badges/share";
+import type { ButtonShare } from "../profileButton/share";
+
+const WRITE_MS = 150;
+const POLL_MS = 750;
+const FETCH_MIN_MS = 600;
+let bioWriteChain: Promise<void> = Promise.resolve();
+const PROFILE_OPEN_RE = /userProfileModal|userProfileOuter|userPopoutOuter|profilePanel|biteSize/;
+
+const lastFetchAt = new Map<string, number>();
+const inFlight = new Map<string, Promise<unknown>>();
+let visibleIds = new Set<string>();
+let refs = 0;
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+let openObserver: MutationObserver | null = null;
+let bioObserver: MutationObserver | null = null;
+
+function profileRoots() {
+    return [...document.querySelectorAll<HTMLElement>([
+        '[class*="userProfileModal"]',
+        '[class*="userProfileOuter"]',
+        '[class*="userProfileInner"]',
+        '[class*="userPopoutOuter"]',
+        '[class*="userPopoutInner"]',
+        '[class*="profilePanel"]',
+        '[class*="biteSize"]',
+    ].join(","))];
+}
+
+function findUserIdNear(el: Element | null): string | null {
+    let cur: Element | null = el;
+    for (let i = 0; i < 50 && cur; i++) {
+        const fiberKey = Object.keys(cur).find(k =>
+            k.startsWith("__reactFiber$") || k.startsWith("__reactInternalInstance$")
+        );
+        let fiber: any = fiberKey ? (cur as any)[fiberKey] : null;
+        for (let d = 0; d < 40 && fiber; d++, fiber = fiber.return) {
+            const p = fiber.memoizedProps || fiber.pendingProps || {};
+            if (p.user?.id) return String(p.user.id);
+            if (p.userId) return String(p.userId);
+            if (typeof p.id === "string" && /^\d{16,20}$/.test(p.id) && p.username) return p.id;
+        }
+        cur = cur.parentElement;
+    }
+    return null;
+}
+
+let hideTimer = 0;
+
+function visibleShareText(text: string) {
+    let out = "";
+    for (const ch of text) {
+        const cp = ch.codePointAt(0) ?? 0;
+        if (cp >= 0xe0000 && cp <= 0xe007f) continue;
+        if (cp === 0x200b || cp === 0x200c || cp === 0x200d || cp === 0xfe0f) continue;
+        if (/\s/.test(ch)) continue;
+        out += ch;
+    }
+    return out;
+}
+
+function hasShareTags(text: string) {
+    for (const ch of text) {
+        const cp = ch.codePointAt(0) ?? 0;
+        if (cp >= 0xe0000 && cp <= 0xe007f) return true;
+    }
+    return false;
+}
+
+function hideGhostShareBios() {
+    for (const root of profileRoots()) {
+        for (const el of root.querySelectorAll<HTMLElement>("[data-vc-share-bio-hidden]")) {
+            const vis = visibleShareText(el.textContent ?? "");
+            if (vis && !/^(about\s*me|about|bio)$/i.test(vis)) {
+                el.style.removeProperty("display");
+                el.removeAttribute("data-vc-share-bio-hidden");
+            }
+        }
+
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        const starts = new Set<HTMLElement>();
+        let node: Node | null;
+        while ((node = walker.nextNode())) {
+            const text = node.nodeValue ?? "";
+            if (!hasShareTags(text) || visibleShareText(text)) continue;
+            const parent = node.parentElement;
+            if (parent) starts.add(parent);
+        }
+
+        for (const start of starts) {
+            if (!start.isConnected || start.closest("[data-vc-share-bio-hidden]")) continue;
+            if (start.closest(".vc-profile-button-host, .vc-nickname-panel")) continue;
+            if (start.querySelector("img, button, input, textarea, canvas, video, a")) continue;
+
+            let target = start;
+            for (let i = 0; i < 8 && target.parentElement && target.parentElement !== root; i++) {
+                const parent = target.parentElement;
+                if (parent.querySelector("img, button, input, textarea, canvas, video")) break;
+                const vis = visibleShareText(parent.textContent ?? "");
+                if (vis && !/^(about\s*me|about|bio)$/i.test(vis)) break;
+                if (parent.getBoundingClientRect().height > 160) break;
+                target = parent;
+            }
+
+            const box = target.getBoundingClientRect();
+            if (box.height < 4 || box.height > 160) continue;
+            if (target === root) continue;
+            target.style.setProperty("display", "none", "important");
+            target.setAttribute("data-vc-share-bio-hidden", "1");
+        }
+    }
+}
+
+function scheduleHideGhostBios() {
+    if (hideTimer) cancelAnimationFrame(hideTimer);
+    hideTimer = requestAnimationFrame(() => {
+        hideTimer = 0;
+        try { hideGhostShareBios(); } catch { /* ignore */ }
+        requestAnimationFrame(() => {
+            try { hideGhostShareBios(); } catch { /* ignore */ }
+        });
+    });
+}
+
+function scanVisibleIds() {
+    const next = new Set<string>();
+    for (const root of profileRoots()) {
+        const id = findUserIdNear(root);
+        if (id) next.add(id);
+    }
+    return next;
+}
+
+export async function refreshUserProfile(userId: string, force = false) {
+    if (!userId) return UserProfileStore.getUserProfile(userId);
+    const now = Date.now();
+    if (!force) {
+        const prev = lastFetchAt.get(userId) ?? 0;
+        if (now - prev < FETCH_MIN_MS) return UserProfileStore.getUserProfile(userId);
+    }
+    const existing = inFlight.get(userId);
+    if (existing) return existing;
+
+    const pending = (async () => {
+        FluxDispatcher.dispatch({ type: "USER_PROFILE_FETCH_START", userId });
+        try {
+            const { body } = await RestAPI.get({
+                url: Constants.Endpoints.USER_PROFILE(userId),
+                query: {
+                    with_mutual_guilds: false,
+                    with_mutual_friends_count: false
+                },
+                oldFormErrors: true,
+            });
+            FluxDispatcher.dispatch({ type: "USER_UPDATE", user: body.user });
+            await FluxDispatcher.dispatch({ type: "USER_PROFILE_FETCH_SUCCESS", userProfile: body });
+            lastFetchAt.set(userId, Date.now());
+            scheduleHideGhostBios();
+            window.setTimeout(() => scheduleHideGhostBios(), 120);
+            return UserProfileStore.getUserProfile(userId);
+        } catch (e) {
+            FluxDispatcher.dispatch({ type: "USER_PROFILE_FETCH_FAILURE", userId });
+            throw e;
+        } finally {
+            inFlight.delete(userId);
+        }
+    })();
+
+    inFlight.set(userId, pending);
+    return pending;
+}
+
+function pollVisible() {
+    for (const id of visibleIds) {
+        void refreshUserProfile(id).catch(() => undefined);
+    }
+}
+
+function syncPoll() {
+    if (visibleIds.size === 0) {
+        if (pollTimer) {
+            clearInterval(pollTimer);
+            pollTimer = null;
+        }
+        return;
+    }
+    if (!pollTimer) pollTimer = setInterval(pollVisible, POLL_MS);
+}
+
+function setVisible(next: Set<string>) {
+    const added: string[] = [];
+    for (const id of next) {
+        if (!visibleIds.has(id)) added.push(id);
+    }
+    visibleIds = next;
+    for (const id of added) void refreshUserProfile(id, true).catch(() => undefined);
+    syncPoll();
+}
+
+function watchGhostBios() {
+    bioObserver?.disconnect();
+    bioObserver = null;
+    const roots = profileRoots();
+    if (!roots.length) return;
+    bioObserver = new MutationObserver(() => scheduleHideGhostBios());
+    for (const root of roots) {
+        bioObserver.observe(root, { childList: true, subtree: true, characterData: true });
+    }
+}
+
+function scanOpenProfiles() {
+    setVisible(scanVisibleIds());
+    watchGhostBios();
+    scheduleHideGhostBios();
+}
+
+function onModalOpen(event: { userId?: string; }) {
+    const id = event?.userId && String(event.userId);
+    if (!id) return;
+    if (!visibleIds.has(id)) {
+        const next = new Set(visibleIds);
+        next.add(id);
+        setVisible(next);
+        return;
+    }
+    void refreshUserProfile(id, true).catch(() => undefined);
+}
+
+function onProfileMutation(records: MutationRecord[]) {
+    for (const rec of records) {
+        for (const node of [...rec.addedNodes, ...rec.removedNodes]) {
+            if (node instanceof HTMLElement && PROFILE_OPEN_RE.test(node.className)) {
+                scanOpenProfiles();
+                return;
+            }
+        }
+    }
+}
+
+export function noteOpenProfile(userId: string | null | undefined) {
+    if (!userId) return;
+    const id = String(userId);
+    if (visibleIds.has(id)) return;
+    const next = new Set(visibleIds);
+    next.add(id);
+    setVisible(next);
+}
+
+export async function patchOwnBio(mutate: (bio: string) => string) {
+    let release!: () => void;
+    const previous = bioWriteChain;
+    bioWriteChain = new Promise<void>(resolve => {
+        release = resolve;
+    });
+    await previous;
+    try {
+        const userId = UserStore.getCurrentUser()?.id;
+        if (!userId) return;
+        let profile = UserProfileStore.getUserProfile(userId);
+        const fetchedAt = lastFetchAt.get(userId) ?? 0;
+        if (!profile || Date.now() - fetchedAt > 1500) {
+            profile = await refreshUserProfile(userId, true).catch(() => profile);
+        }
+        const bio = profile?.bio ?? "";
+        const next = mutate(bio);
+        if (next === bio) return;
+        await RestAPI.patch({
+            url: "/users/@me/profile",
+            body: { bio: next }
+        });
+        await refreshUserProfile(userId, true).catch(() => undefined);
+    } finally {
+        release();
+    }
+}
+
+export function createShareSync(sync: () => Promise<void>) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let queued = false;
+    let running = false;
+
+    const run = () => {
+        if (running) {
+            queued = true;
+            return;
+        }
+        running = true;
+        void (async () => {
+            try {
+                await sync();
+            } finally {
+                running = false;
+                if (queued) {
+                    queued = false;
+                    run();
+                }
+            }
+        })();
+    };
+
+    return () => {
+        clearTimeout(timer);
+        timer = setTimeout(run, WRITE_MS);
+    };
+}
+
+let ownBadgeShare: ShareState | null = null;
+let ownButtonShare: ButtonShare | null = null;
+
+function bumpProfiles() {
+    try { (UserStore as { emitChange?: () => void; }).emitChange?.(); } catch { /* ignore */ }
+    try { (UserProfileStore as { emitChange?: () => void; }).emitChange?.(); } catch { /* ignore */ }
+}
+
+export function setOwnBadgeShare(state: ShareState | null) {
+    ownBadgeShare = state;
+    bumpProfiles();
+}
+
+export function getOwnBadgeShare() {
+    return ownBadgeShare;
+}
+
+export function setOwnButtonShare(state: ButtonShare | null) {
+    ownButtonShare = state;
+    bumpProfiles();
+}
+
+export function getOwnButtonShare() {
+    return ownButtonShare;
+}
+
+export function startLiveShare() {
+    refs++;
+    if (refs > 1) return;
+    FluxDispatcher.subscribe("USER_PROFILE_MODAL_OPEN", onModalOpen);
+    scanOpenProfiles();
+    openObserver = new MutationObserver(onProfileMutation);
+    openObserver.observe(document.body, { childList: true, subtree: true });
+}
+
+export function stopLiveShare() {
+    refs = Math.max(0, refs - 1);
+    if (refs > 0) return;
+    FluxDispatcher.unsubscribe("USER_PROFILE_MODAL_OPEN", onModalOpen);
+    openObserver?.disconnect();
+    openObserver = null;
+    if (hideTimer) cancelAnimationFrame(hideTimer);
+    hideTimer = 0;
+    bioObserver?.disconnect();
+    bioObserver = null;
+    if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+    }
+    visibleIds = new Set();
+    inFlight.clear();
+}

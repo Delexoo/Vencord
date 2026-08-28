@@ -19,6 +19,15 @@
     max-width: none !important;
     max-height: none !important;
     overflow: visible !important;
+    pointer-events: auto !important;
+    cursor: pointer !important;
+    position: relative;
+    z-index: 2;
+}
+
+.vc-profile-button-badge,
+.vc-profile-button-badge * {
+    pointer-events: auto !important;
 }
 
 .vc-profile-button-badge {
@@ -36,6 +45,8 @@
     color: #fff;
     cursor: pointer;
     vertical-align: middle;
+    position: relative;
+    z-index: 2;
 }
 
 .vc-profile-button-badge:hover {

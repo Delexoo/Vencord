@@ -299,3 +299,13 @@
     width: fit-content;
     margin: 0;
 }
+
+[data-vc-share-bio-hidden="1"] {
+    display: none !important;
+    height: 0 !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    border: 0 !important;
+}

@@ -4,20 +4,18 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { BadgePosition, BadgeUserArgs, ProfileBadge } from "@api/Badges";
 import { definePluginSettings } from "@api/Settings";
 import { FormSwitch } from "@components/FormSwitch";
 import { Heading } from "@components/Heading";
 import { Link } from "@components/Link";
-import { debounce } from "@shared/debounce";
 import { classNameFactory } from "@utils/css";
-import { fetchUserProfile } from "@utils/discord";
 import definePlugin, { OptionType } from "@utils/types";
 import { ActivityType } from "@vencord/discord-types/enums";
-import { Button, IconUtils, PresenceStore, RestAPI, Select, showToast, Text, UserProfileStore, UserStore, useEffect, useStateFromStores } from "@webpack/common";
+import { Button, IconUtils, PresenceStore, Select, showToast, Text, UserProfileStore, UserStore, useEffect, useStateFromStores } from "@webpack/common";
 import type { CSSProperties } from "react";
 
-import { Delexo, DELEXO_DISCORD_ID } from "../_delexo/author";
+import { Delexo } from "../_delexo/author";
+import { createShareSync, patchOwnBio, refreshUserProfile, setOwnBadgeShare, startLiveShare, stopLiveShare } from "../_delexo/liveShare";
 import {
     badgeIcon,
     CHOICE_GROUPS,
@@ -30,9 +28,8 @@ import {
     type BadgeSection,
     type ChoiceGroup,
 } from "./catalog";
+import { VENCORD_CONTRIBUTOR_ICON, VENCORD_CONTRIBUTOR_USER_ID } from "./render";
 import {
-    decodeShare,
-    stateToOptions,
     stripShare,
     writeShare,
     type ShareState,
@@ -40,9 +37,6 @@ import {
 import managedStyle from "./style.css?managed";
 
 const cl = classNameFactory("vc-delexo-badges-");
-
-const VENCORD_CONTRIBUTOR_ICON = "https://cdn.discordapp.com/emojis/1092089799109775453.png?size=64";
-const VENCORD_CONTRIBUTOR_USER_ID = String(DELEXO_DISCORD_ID);
 
 type ChoiceKey = typeof CHOICE_GROUPS[number]["key"];
 type ToggleId = typeof TOGGLE_BADGES[number]["id"];
@@ -221,27 +215,6 @@ function toggleOn(id: ToggleId) {
     return (settings.store as Record<string, unknown>)[id] === true;
 }
 
-function legacyUsernameTooltip(userId?: string) {
-    const user = (userId && UserStore.getUser(userId)) || UserStore.getCurrentUser();
-    const name = user?.username;
-    const disc = user?.discriminator && user.discriminator !== "0" ? `#${user.discriminator}` : "";
-    return name ? `Originally known as ${name}${disc}` : "Legacy Username";
-}
-
-function toProfileBadge(option: BadgeOption, userId?: string): ProfileBadge {
-    const description = option.discordId === "legacy_username"
-        ? legacyUsernameTooltip(userId)
-        : option.description;
-    return {
-        id: `delexo_${option.discordId}`,
-        key: option.discordId,
-        description,
-        iconSrc: badgeIcon(option.hash),
-        link: option.link,
-        position: BadgePosition.START
-    };
-}
-
 function currentShareState(): ShareState {
     const choices: Record<string, string> = {};
     for (const group of CHOICE_GROUPS) choices[group.key] = choiceValue(group.key);
@@ -254,37 +227,17 @@ function currentShareState(): ShareState {
     };
 }
 
-function shareStateFor(userId: string): ShareState | null {
-    if (userId === ownId()) return currentShareState();
-    try {
-        return decodeShare(UserProfileStore.getUserProfile(userId)?.bio);
-    } catch {
-        return null;
-    }
-}
-
 async function syncShareToBio() {
-    const userId = ownId();
-    if (!userId) return;
+    const state = currentShareState();
+    setOwnBadgeShare(state);
     try {
-        let profile = UserProfileStore.getUserProfile(userId);
-        if (!profile) profile = await fetchUserProfile(userId);
-        const state = currentShareState();
-        const bio = profile?.bio ?? "";
-        const next = writeShare(bio, state);
-        if (next === bio) return;
-        await RestAPI.patch({
-            url: "/users/@me/profile",
-            body: { bio: next }
-        });
+        await patchOwnBio(bio => writeShare(bio, state));
     } catch (e) {
         console.error("[Badges] failed to save client-side badge share", e);
     }
 }
 
-const scheduleShare = debounce(() => {
-    void syncShareToBio();
-}, 800);
+const scheduleShare = createShareSync(syncShareToBio);
 
 function applyGodMode() {
     const store = settings.store as Record<string, unknown>;
@@ -294,6 +247,7 @@ function applyGodMode() {
         if (top) store[group.key] = top.id;
     }
     for (const badge of TOGGLE_BADGES) store[badge.id] = true;
+    setOwnBadgeShare(currentShareState());
     scheduleShare();
     showToast("All badges set to max");
 }
@@ -303,6 +257,7 @@ function applyReset() {
     store.vencordContributor = false;
     for (const group of CHOICE_GROUPS) store[group.key] = "off";
     for (const badge of TOGGLE_BADGES) store[badge.id] = false;
+    setOwnBadgeShare(currentShareState());
     scheduleShare();
     showToast("Badges reset");
 }
@@ -533,7 +488,7 @@ function SettingsPanel() {
 
     useEffect(() => {
         if (!me?.id) return;
-        void fetchUserProfile(me.id).catch(() => undefined);
+        void refreshUserProfile(me.id, true).catch(() => undefined);
     }, [me?.id]);
 
     const extra = enabledOptions();
@@ -564,7 +519,7 @@ function SettingsPanel() {
                     color={Button.Colors.BRAND}
                     onClick={applyGodMode}
                 >
-                    GODMODE
+                    LARPMODE
                 </Button>
                 <Button
                     className={cl("reset")}
@@ -575,7 +530,7 @@ function SettingsPanel() {
                 </Button>
             </div>
             <div className={cl("hint")}>
-                Client-side badges from <Link href={HELP_ARTICLE}>Profile Badges 101</Link>. Other people with this plugin can see them. Reopen a profile to refresh.
+                Client-side badges from <Link href={HELP_ARTICLE}>Profile Badges 101</Link>. Anyone with Vencord installed can see them. Changes show up in about a second while a profile is open.
             </div>
 
             <div className={cl("section")}>
@@ -600,46 +555,30 @@ function SettingsPanel() {
     );
 }
 
-function getBadges({ userId }: BadgeUserArgs): ProfileBadge[] {
-    const badges: ProfileBadge[] = [];
-    const shared = shareStateFor(userId);
-    const showContributor = userId === VENCORD_CONTRIBUTOR_USER_ID && (contributorOn() || Boolean(shared?.contributor));
-
-    if (showContributor) {
-        badges.push({
-            id: "delexo_vencord_contributor",
-            key: "delexo_vencord_contributor",
-            description: "Vencord Contributor",
-            iconSrc: VENCORD_CONTRIBUTOR_ICON,
-            position: BadgePosition.START
-        });
-    }
-
-    const extra = userId === ownId()
-        ? enabledOptions()
-        : (shared ? stateToOptions(shared) : []);
-
-    badges.push(...extra.map(option => toProfileBadge(option, userId)));
-    return badges;
-}
-
-const profileBadge: ProfileBadge = {
-    id: "delexo_badges",
-    getBadges,
-    position: BadgePosition.START
-};
-
 export default definePlugin({
     name: "Badges",
-    description: "Toggle official Discord profile badges onto your profile. Other people with this plugin can see them.",
+    description: "Toggle official Discord profile badges onto your profile. Anyone with Vencord installed can see them.",
     authors: [Delexo],
-    dependencies: ["BadgeAPI"],
     tags: ["Appearance"],
+    enabledByDefault: true,
+    requiresRestart: false,
     settings,
     managedStyle,
-    userProfileBadge: profileBadge,
+
+    flux: {
+        USER_PROFILE_MODAL_OPEN({ userId }: { userId?: string; }) {
+            if (userId) void refreshUserProfile(String(userId), true).catch(() => undefined);
+        }
+    },
 
     start() {
+        startLiveShare();
+        setOwnBadgeShare(currentShareState());
         scheduleShare();
+    },
+
+    stop() {
+        setOwnBadgeShare(null);
+        stopLiveShare();
     }
 });
