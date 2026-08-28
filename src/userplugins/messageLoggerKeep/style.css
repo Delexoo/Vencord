@@ -1,0 +1,6 @@
+.vc-ml-keep-disclaimer {
+    margin: 0 0 4px;
+    color: var(--text-muted, #b5bac1);
+    font-size: 13px;
+    line-height: 1.4;
+}

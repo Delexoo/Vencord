@@ -33,6 +33,7 @@ import { Message, MessageAttachment } from "@vencord/discord-types";
 import { findCssClassesLazy } from "@webpack";
 import { AuthenticationStore, ChannelStore, FluxDispatcher, Menu, MessageStore, Parser, SelectedChannelStore, Timestamp, UserStore, useStateFromStores } from "@webpack/common";
 
+import { Delexo } from "../../userplugins/_delexo/author";
 import overlayStyle from "./deleteStyleOverlay.css?managed";
 import textStyle from "./deleteStyleText.css?managed";
 import { openHistoryModal } from "./HistoryModal";
@@ -80,6 +81,18 @@ const settings = definePluginSettings({
         type: OptionType.BOOLEAN,
         description: "Whether to log edited messages",
         default: true,
+    },
+    keepFor: {
+        type: OptionType.SELECT,
+        description: "How long deleted and edited messages stay",
+        default: "forever",
+        options: [
+            { label: "Forever", value: "forever", default: true },
+            { label: "1 Year", value: "year" },
+            { label: "1 Month", value: "month" },
+            { label: "1 Week", value: "week" },
+            { label: "1 Day", value: "day" }
+        ]
     },
     inlineEdits: {
         type: OptionType.BOOLEAN,
@@ -232,7 +245,7 @@ export default definePlugin({
     name: "MessageLogger",
     description: "Temporarily logs deleted and edited messages.",
     tags: ["Chat", "Utility"],
-    authors: [Devs.rushii, Devs.Ven, Devs.AutumnVN, Devs.Nickyux, Devs.Kyuuhachi, Devs.sadan],
+    authors: [Delexo, Devs.rushii, Devs.Ven, Devs.AutumnVN, Devs.Nickyux, Devs.Kyuuhachi, Devs.sadan],
     dependencies: ["MessageUpdaterAPI"],
     settings,
     contextMenus: {

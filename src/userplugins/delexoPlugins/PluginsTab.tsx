@@ -130,7 +130,8 @@ function ExcludedPluginsList({ search }: { search: string; }) {
 }
 
 function isDelexoPlugin(name: string) {
-    return PluginMeta[name]?.userPlugin === true;
+    if (PluginMeta[name]?.userPlugin === true) return true;
+    return Plugins[name]?.authors?.some(a => a.id === DELEXO_DISCORD_ID) === true;
 }
 
 function makeDependencyList(deps: string[]) {

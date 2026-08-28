@@ -1,26 +1,4 @@
+.vc-nickname-display,
 .vc-nickname-handle {
-    cursor: text !important;
-}
-
-.vc-nickname-handle:hover {
-    text-decoration: underline;
-    text-decoration-style: dotted;
-    text-underline-offset: 3px;
-}
-
-.vc-nickname-handle.vc-nickname-editing {
-    text-decoration: none;
-}
-
-.vc-nickname-input {
-    box-sizing: border-box;
-    margin: 0;
-    padding: 0 2px;
-    border: none;
-    border-bottom: 1px dashed currentColor;
-    border-radius: 0;
-    background: transparent;
-    outline: none;
-    min-width: 4ch;
-    caret-color: currentColor;
+    cursor: default;
 }

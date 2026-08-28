@@ -4,8 +4,10 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import { definePluginSettings } from "@api/Settings";
+import { debounce } from "@shared/debounce";
 import { classNameFactory } from "@utils/css";
-import definePlugin from "@utils/types";
+import definePlugin, { OptionType } from "@utils/types";
 import { UserStore } from "@webpack/common";
 
 import { Delexo } from "../_delexo/author";
@@ -13,51 +15,101 @@ import managedStyle from "./style.css?managed";
 
 const cl = classNameFactory("vc-nickname-");
 const MARK = "data-vc-nickname";
+const ORIG = "data-vc-nickname-orig";
 const MAX_LEN = 32;
-const SKIP = "#vc-last-online-profile-host, .vc-profile-button-host, .vc-nickname-input";
+const SKIP = "#vc-last-online-profile-host, .vc-profile-button-host, input, textarea, [contenteditable='true']";
 
 const PROFILE_ROOT = [
     '[class*="userProfileModal"]',
     '[class*="userProfileOuter"]',
     '[class*="userPopoutOuter"]',
-    '[class*="profilePanel"]',
-    '[class*="fullSize"][class*="userProfile"]'
+    '[class*="userProfileInner"]',
+    '[class*="profilePanel"]'
 ].join(", ");
 
+const ACCOUNT_ROOT = 'section[class*="panels"]';
+
+const NAME_SEL = [
+    "h1",
+    "h2",
+    "h3",
+    "[class*='nickname']",
+    "[class*='displayName']",
+    "[class*='userTagUsername']",
+    "[class*='userTag']",
+    "[class*='nameTag']",
+    "[class*='username']",
+    "[class*='handle']"
+].join(", ");
+
+type NameKind = "display" | "handle";
+
+const settings = definePluginSettings({
+    displayName: {
+        type: OptionType.STRING,
+        description: "Display name shown on your profile. Leave empty to keep your real display name.",
+        default: "You",
+        placeholder: "You",
+        onChange() { namesCache = null; scheduleTick(); }
+    },
+    handle: {
+        type: OptionType.STRING,
+        description: "Handle shown on your profile. Leave empty to keep your real username.",
+        default: "You",
+        placeholder: "You",
+        onChange() { namesCache = null; scheduleTick(); }
+    }
+});
+
 let observer: MutationObserver | null = null;
-let queued = false;
+let profileObserver: MutationObserver | null = null;
+let watchedRoot: HTMLElement | null = null;
 let applying = false;
-let override: string | null = null;
-let editing = false;
-let draft = "";
-let sessionRoot: HTMLElement | null = null;
-let sessionTab = "";
-let wired: HTMLElement | null = null;
-let overlay: HTMLInputElement | null = null;
-let overlayTarget: HTMLElement | null = null;
+let namesCache: Set<string> | null = null;
+
+const PROFILE_OPEN_RE = /userProfileModal|userProfileOuter|userPopoutOuter|profilePanel/;
 
 function norm(el: Element | null) {
     return (el?.textContent || "").replace(/\s+/g, " ").trim();
+}
+
+function stripAt(text: string) {
+    return text.replace(/^@/, "").trim();
 }
 
 function ownUser() {
     return UserStore.getCurrentUser();
 }
 
+function desired(kind: NameKind) {
+    const raw = kind === "display" ? settings.store.displayName : settings.store.handle;
+    return String(raw ?? "").trim().slice(0, MAX_LEN);
+}
+
 function ownNames() {
+    if (namesCache) return namesCache;
     const me = ownUser();
-    if (!me) return [] as string[];
-    const names = [me.username];
-    if (me.globalName && me.globalName !== me.username) names.push(me.globalName);
+    const names = new Set<string>();
+    if (me?.username) names.add(me.username);
+    if (me?.globalName) names.add(me.globalName);
+    const display = desired("display");
+    const handle = desired("handle");
+    if (display) names.add(display);
+    if (handle) names.add(handle);
+    namesCache = names;
     return names;
 }
 
-function matchesOwnName(text: string) {
-    const t = text.replace(/^@/, "").trim();
-    if (!t) return false;
-    if (override != null && t === override) return true;
-    if (draft && editing && t === draft) return true;
-    return ownNames().some(n => n.toLowerCase() === t.toLowerCase());
+function isOwnLabel(text: string) {
+    const t = stripAt(text);
+    if (!t || t.length > 40) return false;
+    const names = ownNames();
+    if (names.has(t)) return true;
+    const lower = t.toLowerCase();
+    for (const name of names) {
+        if (name.toLowerCase() === lower) return true;
+    }
+    return false;
 }
 
 function findUserIdNear(el: Element | null): string | null {
@@ -83,315 +135,238 @@ function isNestedProfile(el: HTMLElement) {
     return parent != null && parent !== el;
 }
 
-function headingLooksOwn(el: HTMLElement) {
-    const heading = el.querySelector<HTMLElement>("h1, h2, h3, [class*='nickname'], [class*='displayName']");
-    return matchesOwnName(norm(heading));
-}
-
-function isOwnProfileRoot(el: HTMLElement) {
+function isOwnRoot(el: HTMLElement) {
     const me = ownUser()?.id;
     if (!me) return false;
     const id = findUserIdNear(el);
     if (id === me) return true;
     if (id && id !== me) return false;
-    return headingLooksOwn(el);
+    return [...el.querySelectorAll<HTMLElement>(NAME_SEL)].some(node => isOwnLabel(norm(node)));
 }
 
-function findOwnProfileRoot(): HTMLElement | null {
-    const nodes = document.querySelectorAll<HTMLElement>(PROFILE_ROOT);
-    let popout: HTMLElement | null = null;
-    for (const el of nodes) {
+function collectRoots() {
+    const out: HTMLElement[] = [];
+    const seen = new Set<HTMLElement>();
+    const add = (el: HTMLElement | null) => {
+        if (!el || seen.has(el) || !isOwnRoot(el)) return;
+        seen.add(el);
+        out.push(el);
+    };
+
+    for (const el of document.querySelectorAll<HTMLElement>(PROFILE_ROOT)) {
         if (isNestedProfile(el)) continue;
-        if (!isOwnProfileRoot(el)) continue;
-        if (el.matches('[class*="userProfileModal"], [class*="userProfileOuter"]')) return el;
-        popout = el;
+        add(el);
     }
-    return popout;
+    for (const el of document.querySelectorAll<HTMLElement>(ACCOUNT_ROOT)) add(el);
+    return out;
 }
 
-function tabKey(root: HTMLElement) {
-    const selected =
-        root.querySelector('[role="tab"][aria-selected="true"]') ||
-        root.querySelector('[class*="tabBar"] [class*="selected"]');
-    return norm(selected) || "default";
-}
-
-function inHeader(root: HTMLElement, el: HTMLElement) {
-    const rr = root.getBoundingClientRect();
-    const r = el.getBoundingClientRect();
-    if (r.width < 12 || r.height < 12) return false;
-    return r.top < rr.top + Math.max(320, rr.height * 0.55);
-}
-
-function isJunkName(text: string) {
+function isJunk(text: string) {
     return /^(activity|mutual|message|note|member since|friends since|edit profile|view full profile|bio|pronouns)$/i.test(text);
 }
 
-function scoreNameEl(el: HTMLElement, root: HTMLElement) {
-    if (el.closest(SKIP)) return -1;
-    if (el.closest("button") && !/nickname|displayName|username|userTag|nameTag|handle/i.test(el.className + (el.parentElement?.className ?? ""))) {
-        const t = norm(el);
-        if (!matchesOwnName(t)) return -1;
-    }
-    const t = norm(el);
-    if (!t || t.length > 40 || isJunkName(t) || !matchesOwnName(t)) return -1;
-    if (!inHeader(root, el)) return -1;
-    const r = el.getBoundingClientRect();
-    let score = r.height + r.width / 20;
-    if (/^(h1|h2|h3)$/i.test(el.tagName)) score += 80;
-    if (/nickname|displayName/i.test(el.className)) score += 60;
-    if (/userTagUsername|userTag|nameTag|handle|username/i.test(el.className)) score += 40;
-    const kids = el.querySelectorAll("h1, h2, h3, span, div").length;
-    if (kids > 8) score -= 40;
-    return score;
+function skipEl(el: HTMLElement) {
+    if (el.closest(SKIP)) return true;
+    if (/clanTag|guildTag|badge/i.test(el.className)) return true;
+    return false;
 }
 
-function findHandle(root: HTMLElement): HTMLElement | null {
-    const nodes = root.querySelectorAll<HTMLElement>(
-        "h1, h2, h3, [class*='nickname'], [class*='displayName'], [class*='userTagUsername'], [class*='userTag'], [class*='nameTag'], [class*='username'], [class*='handle'], span, div"
-    );
+function isLeafName(el: HTMLElement) {
+    for (const child of el.querySelectorAll<HTMLElement>(NAME_SEL)) {
+        if (child !== el && isOwnLabel(norm(child))) return false;
+    }
+    return true;
+}
+
+function classify(el: HTMLElement): NameKind | null {
+    if (skipEl(el) || !isLeafName(el)) return null;
+    const marked = el.getAttribute(MARK);
+    if (marked === "display" || marked === "handle") return marked;
+    const text = norm(el);
+    if (!text || text.length > 40 || isJunk(text) || !isOwnLabel(text)) return null;
+
+    const cls = `${el.className} ${el.parentElement?.className ?? ""}`;
+    if (/userTagUsername|userTag|nameTag|handle/i.test(cls) || text.startsWith("@")) return "handle";
+    if (/nickname|displayName/i.test(cls) || /^(h1|h2|h3)$/i.test(el.tagName)) return "display";
+    if (/username/i.test(cls)) return "handle";
+    return "display";
+}
+
+function score(el: HTMLElement, kind: NameKind) {
+    let n = 1;
+    const cls = el.className;
+    if (kind === "display") {
+        if (/^(h1|h2|h3)$/i.test(el.tagName)) n += 80;
+        if (/nickname|displayName/i.test(cls)) n += 60;
+    } else {
+        if (/userTagUsername|userTag|nameTag|handle|username/i.test(cls)) n += 60;
+        if (norm(el).startsWith("@")) n += 20;
+    }
+    return n;
+}
+
+function pick(root: HTMLElement, kind: NameKind, used: Set<HTMLElement>) {
     let best: HTMLElement | null = null;
     let bestScore = 0;
-    for (const el of nodes) {
-        const score = scoreNameEl(el, root);
-        if (score > bestScore) {
+    for (const el of root.querySelectorAll<HTMLElement>(NAME_SEL)) {
+        if (used.has(el) || classify(el) !== kind) continue;
+        const n = score(el, kind);
+        if (n > bestScore) {
             best = el;
-            bestScore = score;
+            bestScore = n;
         }
     }
     return best;
 }
 
-function originalName() {
-    const me = ownUser();
-    return me?.globalName || me?.username || "";
-}
-
-function placeOverlay() {
-    if (!overlay || !overlayTarget) return;
-    const r = overlayTarget.getBoundingClientRect();
-    overlay.style.left = `${Math.round(r.left)}px`;
-    overlay.style.top = `${Math.round(r.top)}px`;
-    overlay.style.height = `${Math.max(16, Math.round(r.height))}px`;
-    const len = Math.max(draft.length, overlay.value.length, 4);
-    overlay.style.width = `${Math.max(Math.round(r.width), (len + 1) * 12)}px`;
-}
-
-function removeOverlay() {
-    overlay?.remove();
-    overlay = null;
-    if (overlayTarget) overlayTarget.style.opacity = "";
-    overlayTarget = null;
-}
-
-function applyText(el: HTMLElement) {
-    if (editing) return;
-    const next = override != null ? override : originalName();
-    if (override != null && norm(el) !== next) el.textContent = next;
-}
-
-function stopEdit(next: string | null) {
-    const target = overlayTarget;
-    editing = false;
-    draft = "";
-    override = next && next.trim() ? next.slice(0, MAX_LEN) : null;
-    removeOverlay();
-    if (target) {
-        target.classList.remove(cl("editing"));
-        if (override != null) target.textContent = override;
-        else target.textContent = originalName();
+function nextText(kind: NameKind, orig: string) {
+    switch (kind) {
+        case "display":
+            return desired("display") || orig;
+        case "handle": {
+            const want = desired("handle");
+            if (!want) return orig;
+            return orig.trim().startsWith("@") ? `@${want}` : want;
+        }
+        default: {
+            const _never: never = kind;
+            return orig;
+        }
     }
 }
 
-function beginEdit(el: HTMLElement) {
-    if (overlay && overlayTarget === el) {
-        overlay.focus();
-        overlay.select();
-        return;
+function apply(el: HTMLElement, kind: NameKind) {
+    if (!el.hasAttribute(ORIG)) el.setAttribute(ORIG, el.textContent ?? "");
+    const orig = el.getAttribute(ORIG) ?? "";
+    const next = nextText(kind, orig);
+    el.setAttribute(MARK, kind);
+    el.classList.add(cl(kind));
+    if ((el.textContent ?? "") !== next) el.textContent = next;
+}
+
+function alreadyApplied() {
+    const marked = document.querySelectorAll<HTMLElement>(`[${MARK}]`);
+    if (!marked.length) return false;
+    for (const el of marked) {
+        if (!el.isConnected) return false;
+        const kind = el.getAttribute(MARK);
+        if (kind !== "display" && kind !== "handle") return false;
+        const orig = el.getAttribute(ORIG) ?? "";
+        if ((el.textContent ?? "") !== nextText(kind, orig)) return false;
     }
+    return true;
+}
 
-    removeOverlay();
-    editing = true;
-    draft = override ?? (matchesOwnName(norm(el)) ? norm(el).replace(/^@/, "") : originalName());
-
-    overlayTarget = el;
-    el.classList.add(cl("editing"));
-    el.style.opacity = "0";
-
-    const cs = getComputedStyle(el);
-    const input = document.createElement("input");
-    input.type = "text";
-    input.className = cl("input");
-    input.maxLength = MAX_LEN;
-    input.spellcheck = false;
-    input.autocomplete = "off";
-    input.value = draft;
-    input.setAttribute("aria-label", "Preview nickname");
-    input.style.position = "fixed";
-    input.style.zIndex = "1000000";
-    input.style.fontFamily = cs.fontFamily;
-    input.style.fontSize = cs.fontSize;
-    input.style.fontWeight = cs.fontWeight;
-    input.style.letterSpacing = cs.letterSpacing;
-    input.style.lineHeight = cs.lineHeight;
-    input.style.color = cs.color || "#fff";
-    overlay = input;
-    placeOverlay();
-
-    input.addEventListener("input", () => {
-        draft = input.value;
-        placeOverlay();
-    });
-    input.addEventListener("keydown", e => {
-        if (e.key === "Enter") {
-            e.preventDefault();
-            stopEdit(input.value);
-        } else if (e.key === "Escape") {
-            e.preventDefault();
-            stopEdit(override);
+function watchProfileRoot(root: HTMLElement | null) {
+    if (root === watchedRoot && profileObserver) return;
+    profileObserver?.disconnect();
+    profileObserver = null;
+    watchedRoot = root;
+    if (!root) return;
+    profileObserver = new MutationObserver(records => {
+        for (const rec of records) {
+            if (rec.target instanceof Element && rec.target.closest(`[${MARK}], ${SKIP}`)) continue;
+            scheduleTick();
+            return;
         }
     });
-    input.addEventListener("pointerdown", e => e.stopPropagation());
-    input.addEventListener("click", e => e.stopPropagation());
-    input.addEventListener("blur", () => {
-        if (editing && overlay === input) stopEdit(input.value);
-    });
-
-    document.body.appendChild(input);
-    input.focus();
-    input.select();
-}
-
-function nameFromTarget(target: EventTarget | null): HTMLElement | null {
-    if (!(target instanceof Element)) return null;
-    if (target.closest(".vc-nickname-input")) return null;
-    const marked = target.closest<HTMLElement>(`[${MARK}]`);
-    if (marked) return marked;
-    const root = findOwnProfileRoot();
-    if (!root || !root.contains(target)) return null;
-    let cur: HTMLElement | null = target as HTMLElement;
-    for (let i = 0; i < 8 && cur && root.contains(cur); i++, cur = cur.parentElement) {
-        if (scoreNameEl(cur, root) > 0) return cur;
-    }
-    return findHandle(root);
-}
-
-function onPointerDown(e: PointerEvent) {
-    if (e.button !== 0) return;
-    if (editing) return;
-    const nameEl = nameFromTarget(e.target);
-    if (!nameEl) return;
-    e.preventDefault();
-    e.stopPropagation();
-    e.stopImmediatePropagation();
-    beginEdit(nameEl);
-}
-
-function restoreOriginal(el: HTMLElement | null) {
-    if (!el) return;
-    el.classList.remove(cl("editing"));
-    el.style.opacity = "";
-    if (override != null || editing) el.textContent = originalName();
-}
-
-function unwire() {
-    if (!wired) return;
-    wired.classList.remove(cl("handle"), cl("editing"));
-    wired.removeAttribute(MARK);
-    wired.style.opacity = "";
-    wired = null;
-}
-
-function wire(el: HTMLElement) {
-    if (wired !== el) {
-        unwire();
-        wired = el;
-        el.setAttribute(MARK, "1");
-        el.classList.add(cl("handle"));
-        el.title = "Click to preview a nickname";
-    }
-    applyText(el);
-}
-
-function resetSession() {
-    if (editing) stopEdit(null);
-    restoreOriginal(wired);
-    editing = false;
-    draft = "";
-    override = null;
-    sessionRoot = null;
-    sessionTab = "";
-    unwire();
-    removeOverlay();
+    profileObserver.observe(root, { childList: true, subtree: true });
 }
 
 function tick() {
-    queued = false;
     if (applying) return;
+    namesCache = null;
+    if (alreadyApplied()) {
+        if (!profileObserver) {
+            const marked = document.querySelector<HTMLElement>(`[${MARK}]`);
+            watchProfileRoot(
+                marked?.closest<HTMLElement>(PROFILE_ROOT)
+                ?? marked?.closest<HTMLElement>(ACCOUNT_ROOT)
+                ?? null
+            );
+        }
+        return;
+    }
     applying = true;
+    profileObserver?.disconnect();
     try {
-        const root = findOwnProfileRoot();
-        if (!root) {
-            resetSession();
-            return;
-        }
-
-        if (sessionRoot !== root) {
-            resetSession();
-            sessionRoot = root;
-            sessionTab = tabKey(root);
-        } else {
-            const tab = tabKey(root);
-            if (tab !== sessionTab) {
-                sessionTab = tab;
-                if (editing) stopEdit(null);
-                restoreOriginal(wired);
-                override = null;
-                editing = false;
-                draft = "";
+        const used = new Set<HTMLElement>();
+        let watch: HTMLElement | null = null;
+        for (const root of collectRoots()) {
+            watch = watch ?? root;
+            const display = pick(root, "display", used);
+            if (display) used.add(display);
+            const handle = pick(root, "handle", used);
+            if (handle) used.add(handle);
+            if (display && handle && display !== handle) {
+                apply(display, "display");
+                apply(handle, "handle");
+                continue;
             }
+            const only = display || handle;
+            if (!only) continue;
+            if (desired("display")) apply(only, "display");
+            else if (desired("handle")) apply(only, "handle");
         }
-
-        sessionRoot = root;
-        const handle = findHandle(root);
-        if (!handle) return;
-        wire(handle);
-        if (editing) placeOverlay();
+        watchProfileRoot(watch);
     } finally {
         applying = false;
+        if (watchedRoot) watchProfileRoot(watchedRoot);
     }
 }
 
-function queueTick() {
-    if (queued || applying) return;
-    queued = true;
-    requestAnimationFrame(() => {
-        try { tick(); } catch { queued = false; }
-    });
+const scheduleTick = debounce(() => {
+    try { tick(); } catch { /* ignore */ }
+}, 120);
+
+function didOpenOrCloseProfile(records: MutationRecord[]) {
+    for (const rec of records) {
+        for (const node of rec.addedNodes) {
+            if (node instanceof HTMLElement && PROFILE_OPEN_RE.test(node.className)) return true;
+        }
+        for (const node of rec.removedNodes) {
+            if (node instanceof HTMLElement && PROFILE_OPEN_RE.test(node.className)) return true;
+        }
+    }
+    return false;
+}
+
+function restore(el: HTMLElement) {
+    const orig = el.getAttribute(ORIG);
+    if (orig != null) el.textContent = orig;
+    el.removeAttribute(MARK);
+    el.removeAttribute(ORIG);
+    el.classList.remove(cl("display"), cl("handle"));
+}
+
+function restoreAll() {
+    for (const el of document.querySelectorAll<HTMLElement>(`[${MARK}]`)) restore(el);
 }
 
 export default definePlugin({
     name: "Nickname",
-    description: "Click your name on your own profile to preview a nickname. Visual only — it resets when you leave or switch tabs.",
+    description: "Replace your display name and handle on your own profile. Both optional; both default to You.",
     authors: [Delexo],
     tags: ["Appearance", "Fun"],
-    searchTerms: ["handle", "username", "display name", "preview", "profile"],
+    searchTerms: ["handle", "username", "display name", "you", "profile"],
     requiresRestart: false,
+    settings,
     managedStyle,
 
     start() {
-        observer = new MutationObserver(() => queueTick());
-        observer.observe(document.body, { childList: true, subtree: true, characterData: true });
-        document.addEventListener("pointerdown", onPointerDown, true);
-        window.addEventListener("resize", placeOverlay);
-        queueTick();
+        scheduleTick();
+        observer = new MutationObserver(records => {
+            if (didOpenOrCloseProfile(records)) scheduleTick();
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
     },
 
     stop() {
         observer?.disconnect();
         observer = null;
-        document.removeEventListener("pointerdown", onPointerDown, true);
-        window.removeEventListener("resize", placeOverlay);
-        resetSession();
+        profileObserver?.disconnect();
+        profileObserver = null;
+        watchedRoot = null;
+        restoreAll();
     }
 });

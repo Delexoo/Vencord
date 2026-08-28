@@ -12,7 +12,6 @@ import { debounce } from "@shared/debounce";
 import { classNameFactory } from "@utils/css";
 import { fetchUserProfile } from "@utils/discord";
 import definePlugin, { OptionType } from "@utils/types";
-import type { User } from "@vencord/discord-types";
 import { Button, createRoot, RestAPI, UserProfileStore, UserStore, useEffect, useStateFromStores } from "@webpack/common";
 import type { Root } from "react-dom/client";
 
@@ -152,58 +151,33 @@ function profileRoots() {
         '[class*="userProfileInner"]',
         '[class*="userPopoutOuter"]',
         '[class*="userPopoutInner"]',
+        '[class*="profilePanel"]',
         '[class*="biteSize"]',
     ].join(","));
     return [...nodes];
 }
 
-function actionLabel(el: HTMLElement) {
-    return [
-        el.getAttribute("aria-label"),
-        el.getAttribute("title"),
-        el.textContent,
-    ].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+function isJunkName(text: string) {
+    return /^(activity|mutual|message|note|member since|friends since|edit profile|view full profile|bio|pronouns)$/i.test(text);
 }
 
-function isActionAnchor(el: HTMLElement) {
-    if (el.closest("#vc-profile-button-popout-host, #vc-profile-button-modal-host, .vc-profile-button-slot"))
-        return false;
-    const t = actionLabel(el);
-    return /^(message|send message|send a message|edit profile|view full profile)\b/i.test(t)
-        || /^(message|send message|edit profile|view full profile)$/i.test(t);
-}
-
-function findActionAnchor(): HTMLElement | null {
-    const roots = profileRoots();
-    const scopes = roots.length ? roots : [document.body];
-    for (const root of scopes) {
-        const nodes = root.querySelectorAll<HTMLElement>("button, [role='button']");
-        for (const el of nodes) {
-            if (isActionAnchor(el)) return el;
-        }
+function findNameInRoot(root: HTMLElement): HTMLElement | null {
+    const nodes = root.querySelectorAll<HTMLElement>(
+        "h1, h2, h3, [class*='nickname'], [class*='displayName']"
+    );
+    for (const el of nodes) {
+        if (el.closest("#vc-profile-button-popout-host, #vc-profile-button-modal-host, #vc-last-online-profile-host, .vc-profile-button-host, .vc-nickname-input"))
+            continue;
+        const t = (el.textContent || "").replace(/\s+/g, " ").trim();
+        if (!t || t.length > 40 || isJunkName(t)) continue;
+        if (el.querySelector("h1, h2, h3, [class*='nickname'], [class*='displayName']")) continue;
+        return el;
     }
     return null;
 }
 
-function findButtonRow(anchor: HTMLElement): HTMLElement {
-    return (
-        anchor.closest<HTMLElement>('[class*="buttons"]') ||
-        anchor.closest<HTMLElement>('[class*="buttonContainer"]') ||
-        anchor.parentElement ||
-        anchor
-    );
-}
-
-function slotInRow(anchor: HTMLElement, row: HTMLElement): HTMLElement {
-    if (anchor === row) return anchor;
-    let cur: HTMLElement = anchor;
-    while (cur.parentElement && cur.parentElement !== row)
-        cur = cur.parentElement;
-    return cur;
-}
-
-function isFullProfile(el: HTMLElement) {
-    return Boolean(el.closest('[class*="userProfileModal"]'));
+function profileKind(el: HTMLElement): "popout" | "modal" {
+    return el.closest('[class*="userProfileModal"], [class*="profilePanel"]') ? "modal" : "popout";
 }
 
 const ProfileLinkButton = ErrorBoundary.wrap(function ProfileLinkButton({ userId }: { userId: string; }) {
@@ -239,15 +213,6 @@ const ProfileLinkButton = ErrorBoundary.wrap(function ProfileLinkButton({ userId
     );
 }, { noop: true });
 
-const ProfileButtonSlot = ErrorBoundary.wrap(function ProfileButtonSlot({ user }: { user: User; }) {
-    if (!user?.id) return null;
-    return (
-        <div className={cl("slot")}>
-            <ProfileLinkButton userId={user.id} />
-        </div>
-    );
-}, { noop: true });
-
 function DonateBadgeIcon() {
     return <Heart className={cl("badge-heart")} />;
 }
@@ -273,12 +238,47 @@ const profileBadge: ProfileBadge = {
     position: BadgePosition.START
 };
 
-let popoutHost: HTMLDivElement | null = null;
+let popoutHost: HTMLSpanElement | null = null;
 let popoutRoot: Root | null = null;
-let modalHost: HTMLDivElement | null = null;
+let modalHost: HTMLSpanElement | null = null;
 let modalRoot: Root | null = null;
-let observer: MutationObserver | null = null;
-let queued = false;
+let openObserver: MutationObserver | null = null;
+let profileObserver: MutationObserver | null = null;
+let watchedRoot: HTMLElement | null = null;
+
+const PROFILE_OPEN_RE = /userProfileModal|userProfileOuter|userPopoutOuter|profilePanel|biteSize/;
+
+function didOpenOrCloseProfile(records: MutationRecord[]) {
+    for (const rec of records) {
+        for (const node of rec.addedNodes) {
+            if (node instanceof HTMLElement && PROFILE_OPEN_RE.test(node.className)) return true;
+        }
+        for (const node of rec.removedNodes) {
+            if (node instanceof HTMLElement && PROFILE_OPEN_RE.test(node.className)) return true;
+        }
+    }
+    return false;
+}
+
+function watchProfileRoot(root: HTMLElement | null) {
+    if (root === watchedRoot && profileObserver) return;
+    profileObserver?.disconnect();
+    profileObserver = null;
+    watchedRoot = root;
+    if (!root) return;
+    profileObserver = new MutationObserver(records => {
+        for (const rec of records) {
+            if (rec.target instanceof Element && rec.target.closest(".vc-profile-button-host")) continue;
+            schedulePlace();
+            return;
+        }
+    });
+    profileObserver.observe(root, { childList: true, subtree: true });
+}
+
+function hostValid(host: HTMLElement | null) {
+    return Boolean(host?.isConnected && host.previousElementSibling && host.parentElement);
+}
 
 function removeHost(kind: "popout" | "modal") {
     if (kind === "popout") {
@@ -294,64 +294,102 @@ function removeHost(kind: "popout" | "modal") {
     modalHost = null;
 }
 
-function placeButton() {
-    queued = false;
-    const anchor = findActionAnchor();
-    if (!anchor) {
-        if (popoutHost && !document.body.contains(popoutHost)) removeHost("popout");
-        if (modalHost && !document.body.contains(modalHost)) removeHost("modal");
-        return;
-    }
+function placeInRoot(root: HTMLElement) {
+    const nameEl = findNameInRoot(root);
+    if (!nameEl) return false;
 
-    const userId = findUserIdNear(anchor);
-    if (!userId) return;
+    const userId = findUserIdNear(nameEl);
+    if (!userId) return false;
 
-    const row = findButtonRow(anchor);
-    const slot = slotInRow(anchor, row);
+    const row = nameEl.parentElement;
+    if (!row) return false;
 
-    const modal = isFullProfile(anchor);
-    const kind = modal ? "modal" : "popout";
-    const hostId = modal ? "vc-profile-button-modal-host" : "vc-profile-button-popout-host";
-    let host = modal ? modalHost : popoutHost;
-    let root = modal ? modalRoot : popoutRoot;
+    const kind = profileKind(root);
+    const hostId = kind === "modal" ? "vc-profile-button-modal-host" : "vc-profile-button-popout-host";
+    let host = kind === "modal" ? modalHost : popoutHost;
+    let reactRoot = kind === "modal" ? modalRoot : popoutRoot;
 
-    if (host?.isConnected && host.parentElement === row && host.previousElementSibling === slot && host.getAttribute("data-user-id") === userId)
-        return;
+    if (host?.isConnected && row.contains(host) && host.previousElementSibling === nameEl && host.getAttribute("data-user-id") === userId)
+        return true;
 
+    profileObserver?.disconnect();
     removeHost(kind);
 
-    host = document.createElement("div");
+    host = document.createElement("span");
     host.id = hostId;
-    host.className = cl("host", modal && "host-modal");
+    host.className = cl("host", kind === "modal" && "host-modal");
     host.setAttribute("data-user-id", userId);
 
-    const height = slot.getBoundingClientRect().height;
-    if (height > 0) host.style.height = `${Math.round(height)}px`;
-
-    if (slot.nextSibling)
-        row.insertBefore(host, slot.nextSibling);
+    if (nameEl.nextSibling)
+        row.insertBefore(host, nameEl.nextSibling);
     else
         row.appendChild(host);
 
-    root = createRoot(host);
-    root.render(<ProfileLinkButton userId={userId} />);
+    if (getComputedStyle(row).display === "block")
+        row.classList.add(cl("name-row"));
 
-    if (modal) {
+    reactRoot = createRoot(host);
+    reactRoot.render(<ProfileLinkButton userId={userId} />);
+
+    if (kind === "modal") {
         modalHost = host;
-        modalRoot = root;
+        modalRoot = reactRoot;
     } else {
         popoutHost = host;
-        popoutRoot = root;
+        popoutRoot = reactRoot;
     }
+    if (watchedRoot) watchProfileRoot(watchedRoot);
+    return true;
 }
 
-function queuePlace() {
-    if (queued) return;
-    queued = true;
-    requestAnimationFrame(() => {
-        try { placeButton(); } catch { queued = false; }
-    });
+function placeButton() {
+    let needPopout = false;
+    let needModal = false;
+    let watch: HTMLElement | null = null;
+    for (const root of profileRoots()) {
+        const kind = profileKind(root);
+        if (kind === "modal") needModal = true;
+        else needPopout = true;
+        if (!watch) watch = root;
+    }
+
+    if (!needPopout && popoutHost && !popoutHost.isConnected) removeHost("popout");
+    if (!needModal && modalHost && !modalHost.isConnected) removeHost("modal");
+
+    const popoutOk = !needPopout || hostValid(popoutHost);
+    const modalOk = !needModal || hostValid(modalHost);
+    if (popoutOk && modalOk) {
+        watchProfileRoot(watch);
+        return;
+    }
+
+    if (needPopout && !hostValid(popoutHost)) {
+        for (const root of profileRoots()) {
+            if (profileKind(root) !== "popout") continue;
+            if (placeInRoot(root)) {
+                watch = root;
+                break;
+            }
+        }
+    }
+    if (needModal && !hostValid(modalHost)) {
+        for (const root of profileRoots()) {
+            if (profileKind(root) !== "modal") continue;
+            if (placeInRoot(root)) {
+                watch = root;
+                break;
+            }
+        }
+    }
+
+    if (!needPopout && popoutHost && !popoutHost.isConnected) removeHost("popout");
+    if (!needModal && modalHost && !modalHost.isConnected) removeHost("modal");
+    watchProfileRoot(watch);
 }
+
+const schedulePlace = debounce(() => {
+    try { placeButton(); } catch { /* ignore */ }
+}, 120);
 
 export default definePlugin({
     name: "ProfileButton",
@@ -366,46 +404,22 @@ export default definePlugin({
     managedStyle,
     userProfileBadge: profileBadge,
 
-    patches: [
-        {
-            find: ".SIDEBAR,disableToolbar:",
-            replacement: {
-                match: /user:(\i),widgets:.{0,100}?\}\),(?=.{0,100}unownedWishlistItems:\i,wishlistId:\i)/,
-                replace: "$&$self.renderProfileButton({user:$1}),"
-            },
-            noWarn: true
-        },
-        {
-            find: '"UserProfilePopout");',
-            replacement: {
-                match: /user:(\i),widgets:.{0,100}?\}\),/,
-                replace: "$&$self.renderProfileButton({user:$1}),"
-            },
-            noWarn: true
-        },
-        {
-            find: ".MODAL_V2,onClose:",
-            replacement: {
-                match: /user:(\i),widgets:.{0,100}?\}\),/,
-                replace: "$&$self.renderProfileButton({user:$1}),"
-            },
-            noWarn: true
-        }
-    ],
-
-    renderProfileButton: ProfileButtonSlot,
-
     start() {
         void loadRegistry();
         scheduleShare();
-        queuePlace();
-        observer = new MutationObserver(() => queuePlace());
-        observer.observe(document.body, { childList: true, subtree: true });
+        schedulePlace();
+        openObserver = new MutationObserver(records => {
+            if (didOpenOrCloseProfile(records)) schedulePlace();
+        });
+        openObserver.observe(document.body, { childList: true, subtree: true });
     },
 
     stop() {
-        observer?.disconnect();
-        observer = null;
+        openObserver?.disconnect();
+        openObserver = null;
+        profileObserver?.disconnect();
+        profileObserver = null;
+        watchedRoot = null;
         removeHost("popout");
         removeHost("modal");
         void (async () => {
