@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+import { BadgePosition, BadgeUserArgs, ProfileBadge } from "@api/Badges";
 import { definePluginSettings } from "@api/Settings";
 import ErrorBoundary from "@components/ErrorBoundary";
 import { Heart } from "@components/Heart";
@@ -11,6 +12,7 @@ import { debounce } from "@shared/debounce";
 import { classNameFactory } from "@utils/css";
 import { fetchUserProfile } from "@utils/discord";
 import definePlugin, { OptionType } from "@utils/types";
+import type { User } from "@vencord/discord-types";
 import { Button, createRoot, RestAPI, UserProfileStore, UserStore, useEffect, useStateFromStores } from "@webpack/common";
 import type { Root } from "react-dom/client";
 
@@ -24,6 +26,8 @@ import {
 import managedStyle from "./style.css?managed";
 
 const cl = classNameFactory("vc-profile-button-");
+
+const REGISTRY_URL = "https://raw.githubusercontent.com/Delexoo/Vencord/main/src/userplugins/profileButton/registry.json";
 
 const settings = definePluginSettings({
     label: {
@@ -52,6 +56,8 @@ const settings = definePluginSettings({
     }
 });
 
+let registry: Record<string, ButtonShare> = {};
+
 function ownId() {
     return UserStore.getCurrentUser()?.id;
 }
@@ -65,6 +71,39 @@ function currentShare(): ButtonShare | null {
         url,
         heart: settings.store.showHeart !== false
     };
+}
+
+function registryShare(userId: string): ButtonShare | null {
+    const item = registry[userId];
+    if (!item) return null;
+    const label = String(item.label ?? "").trim().slice(0, 32);
+    const url = String(item.url ?? "").trim();
+    if (!label || !isHttpUrl(url)) return null;
+    return { label, url, heart: item.heart !== false };
+}
+
+function shareFor(userId: string): ButtonShare | null {
+    if (userId === ownId()) return currentShare() ?? registryShare(userId);
+    return decodeShare(UserProfileStore.getUserProfile(userId)?.bio) ?? registryShare(userId);
+}
+
+async function loadRegistry() {
+    try {
+        const res = await fetch(REGISTRY_URL, { cache: "no-cache" });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data || typeof data !== "object") return;
+        const next: Record<string, ButtonShare> = {};
+        for (const [id, value] of Object.entries(data as Record<string, ButtonShare>)) {
+            const label = String(value?.label ?? "").trim().slice(0, 32);
+            const url = String(value?.url ?? "").trim();
+            if (!label || !isHttpUrl(url)) continue;
+            next[id] = { label, url, heart: value.heart !== false };
+        }
+        registry = next;
+    } catch {
+        // ignore
+    }
 }
 
 async function syncShareToBio() {
@@ -106,12 +145,42 @@ function findUserIdNear(el: Element | null): string | null {
     return null;
 }
 
+function profileRoots() {
+    const nodes = document.querySelectorAll<HTMLElement>([
+        '[class*="userProfileModal"]',
+        '[class*="userProfileOuter"]',
+        '[class*="userProfileInner"]',
+        '[class*="userPopoutOuter"]',
+        '[class*="userPopoutInner"]',
+        '[class*="biteSize"]',
+    ].join(","));
+    return [...nodes];
+}
+
+function actionLabel(el: HTMLElement) {
+    return [
+        el.getAttribute("aria-label"),
+        el.getAttribute("title"),
+        el.textContent,
+    ].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+}
+
+function isActionAnchor(el: HTMLElement) {
+    if (el.closest("#vc-profile-button-popout-host, #vc-profile-button-modal-host, .vc-profile-button-slot"))
+        return false;
+    const t = actionLabel(el);
+    return /^(message|send message|send a message|edit profile|view full profile)\b/i.test(t)
+        || /^(message|send message|edit profile|view full profile)$/i.test(t);
+}
+
 function findActionAnchor(): HTMLElement | null {
-    const nodes = document.querySelectorAll<HTMLElement>("button, [role='button']");
-    for (const el of nodes) {
-        if (el.closest("#vc-profile-button-popout-host, #vc-profile-button-modal-host")) continue;
-        const t = (el.textContent || "").replace(/\s+/g, " ").trim();
-        if (/^(message|edit profile|view full profile)$/i.test(t)) return el;
+    const roots = profileRoots();
+    const scopes = roots.length ? roots : [document.body];
+    for (const root of scopes) {
+        const nodes = root.querySelectorAll<HTMLElement>("button, [role='button']");
+        for (const el of nodes) {
+            if (isActionAnchor(el)) return el;
+        }
     }
     return null;
 }
@@ -149,8 +218,8 @@ const ProfileLinkButton = ErrorBoundary.wrap(function ProfileLinkButton({ userId
     }, [userId]);
 
     const data = userId === ownId()
-        ? currentShare()
-        : decodeShare(profile?.bio);
+        ? currentShare() ?? registryShare(userId)
+        : decodeShare(profile?.bio) ?? registryShare(userId);
 
     if (!data) return null;
 
@@ -169,6 +238,40 @@ const ProfileLinkButton = ErrorBoundary.wrap(function ProfileLinkButton({ userId
         </div>
     );
 }, { noop: true });
+
+const ProfileButtonSlot = ErrorBoundary.wrap(function ProfileButtonSlot({ user }: { user: User; }) {
+    if (!user?.id) return null;
+    return (
+        <div className={cl("slot")}>
+            <ProfileLinkButton userId={user.id} />
+        </div>
+    );
+}, { noop: true });
+
+function DonateBadgeIcon() {
+    return <Heart className={cl("badge-heart")} />;
+}
+
+function getBadges({ userId }: BadgeUserArgs): ProfileBadge[] {
+    const data = shareFor(userId);
+    if (!data) return [];
+    return [{
+        id: "delexo_profile_button",
+        key: "delexo_profile_button",
+        description: data.label,
+        component: DonateBadgeIcon,
+        position: BadgePosition.START,
+        onClick() {
+            VencordNative.native.openExternal(data.url);
+        }
+    }];
+}
+
+const profileBadge: ProfileBadge = {
+    id: "delexo_profile_button_wrap",
+    getBadges,
+    position: BadgePosition.START
+};
 
 let popoutHost: HTMLDivElement | null = null;
 let popoutRoot: Root | null = null;
@@ -252,15 +355,48 @@ function queuePlace() {
 
 export default definePlugin({
     name: "ProfileButton",
-    description: "Add a custom button (name + link) on profiles. Other people with this plugin can see yours.",
+    description: "Add a custom button (name + link) on profiles. Every Vencord user with this plugin can see it.",
     authors: [Delexo],
     tags: ["Appearance"],
     searchTerms: ["donate", "button", "profile", "link", "kofi", "stripe", "paypal", "heart"],
+    enabledByDefault: true,
     requiresRestart: false,
+    dependencies: ["BadgeAPI"],
     settings,
     managedStyle,
+    userProfileBadge: profileBadge,
+
+    patches: [
+        {
+            find: ".SIDEBAR,disableToolbar:",
+            replacement: {
+                match: /user:(\i),widgets:.{0,100}?\}\),(?=.{0,100}unownedWishlistItems:\i,wishlistId:\i)/,
+                replace: "$&$self.renderProfileButton({user:$1}),"
+            },
+            noWarn: true
+        },
+        {
+            find: '"UserProfilePopout");',
+            replacement: {
+                match: /user:(\i),widgets:.{0,100}?\}\),/,
+                replace: "$&$self.renderProfileButton({user:$1}),"
+            },
+            noWarn: true
+        },
+        {
+            find: ".MODAL_V2,onClose:",
+            replacement: {
+                match: /user:(\i),widgets:.{0,100}?\}\),/,
+                replace: "$&$self.renderProfileButton({user:$1}),"
+            },
+            noWarn: true
+        }
+    ],
+
+    renderProfileButton: ProfileButtonSlot,
 
     start() {
+        void loadRegistry();
         scheduleShare();
         queuePlace();
         observer = new MutationObserver(() => queuePlace());

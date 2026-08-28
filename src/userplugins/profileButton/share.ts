@@ -45,10 +45,11 @@ export function encodeShare(state: ButtonShare): string {
 export function decodeShare(bio: string | undefined | null): ButtonShare | null {
     if (!bio) return null;
     const ascii = hiddenAscii(bio);
-    const match = ascii.match(/\[dlxp:([A-Za-z0-9+/]+)\]/);
+    const match = ascii.match(/\[dlxp:([A-Za-z0-9+/_-]+)\]/);
     if (!match) return null;
     try {
-        const padded = match[1] + "=".repeat((4 - match[1].length % 4) % 4);
+        const b64 = match[1].replace(/-/g, "+").replace(/_/g, "/");
+        const padded = b64 + "=".repeat((4 - b64.length % 4) % 4);
         const parsed = JSON.parse(decodeURIComponent(escape(atob(padded)))) as { l?: string; u?: string; h?: number; };
         const label = String(parsed.l ?? "").trim().slice(0, 32);
         const url = String(parsed.u ?? "").trim().slice(0, 256);

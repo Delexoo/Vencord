@@ -1,3 +1,25 @@
+[class*="userProfileInner"]:has(.vc-profile-button-host) .vc-profile-button-slot,
+[class*="userPopoutInner"]:has(.vc-profile-button-host) .vc-profile-button-slot,
+[class*="userProfileModal"]:has(.vc-profile-button-host) .vc-profile-button-slot {
+    display: none;
+}
+
+.vc-profile-button-slot {
+    display: flex;
+    align-items: stretch;
+    margin: 8px 12px 0;
+}
+
+.vc-profile-button-slot .vc-profile-button-wrap,
+.vc-profile-button-slot .vc-profile-button-btn {
+    width: 100%;
+}
+
+.vc-profile-button-badge-heart {
+    width: 14px;
+    height: 14px;
+}
+
 [class*="buttons"]:has(.vc-profile-button-host),
 [class*="buttonContainer"]:has(.vc-profile-button-host) {
     display: flex !important;
