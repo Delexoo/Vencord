@@ -8,7 +8,6 @@ import "./ContributorModal.css";
 
 import { useSettings } from "@api/Settings";
 import { Link } from "@components/Link";
-import { DevsById } from "@utils/constants";
 import { classNameFactory } from "@utils/css";
 import { fetchUserProfile } from "@utils/discord";
 import { classes, pluralise } from "@utils/misc";
@@ -40,13 +39,12 @@ function ContributorModal({ user, modalProps }: { user: User; modalProps: Render
     const website = profile?.connectedAccounts?.find(a => a.type === "domain")?.name;
 
     const plugins = useMemo(() => {
-        const allPlugins = Object.values(Plugins);
-        const pluginsByAuthor = DevsById[user.id]
-            ? allPlugins.filter(p => p.authors.includes(DevsById[user.id]))
-            : allPlugins.filter(p => p.authors.some(a => a.name === user.username));
-
-        return pluginsByAuthor
+        const username = user.username.toLowerCase();
+        return Object.values(Plugins)
             .filter(p => !p.name.endsWith("API"))
+            .filter(p => p.authors.some(a =>
+                String(a.id) === user.id || a.name.toLowerCase() === username
+            ))
             .sort((a, b) => Number(a.required ?? false) - Number(b.required ?? false));
     }, [user.id, user.username]);
 

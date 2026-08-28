@@ -346,15 +346,20 @@ try {
             if ($pnpmCode -ne 0) { throw "pnpm install failed" }
         }
 
-        Write-Log "pnpm build"
-        # Keep Delexo plugins in the Discord bundle. Official in-app updates would replace dist.
-        $buildCode = Invoke-Native "cmd.exe" @("/c", "pnpm", "build", "--disable-updater") -AllowFail
-        if ($buildCode -ne 0) { throw "pnpm build failed" }
+        Write-Log "Building Vencord (updater disabled)"
+        # pnpm extra args can land on copyDistToAppData instead of build.mjs — call the bundler directly.
+        $buildCode = Invoke-Native "node.exe" @(
+            "--require=./scripts/suppressExperimentalWarnings.js",
+            "scripts/build/build.mjs",
+            "--disable-updater"
+        ) -AllowFail
+        if ($buildCode -ne 0) { throw "Vencord build failed" }
 
         Write-Log "Running installer"
         [void](Invoke-Native "node.exe" @("scripts/runInstaller.mjs", "--", "--install", "--branch", "auto") -AllowFail)
 
         Write-Log "Copying build to AppData"
+        [void](Invoke-Native "node.exe" @("scripts/copyDistToAppData.mjs") -AllowFail)
         New-Item -ItemType Directory -Force -Path $AppDataDist | Out-Null
         $distDir = Join-Path $VencordDir "dist"
         foreach ($f in @(

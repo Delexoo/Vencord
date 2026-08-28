@@ -18,7 +18,7 @@ import { cl } from "@components/settings/tabs/plugins";
 import { PluginCard } from "@components/settings/tabs/plugins/PluginCard";
 import { UIElementsButton } from "@components/settings/tabs/plugins/UIElements";
 import { ChangeList } from "@utils/ChangeList";
-import { openUserProfile } from "@utils/discord";
+import { openContributorModal } from "@components/settings/tabs/plugins/ContributorModal";
 import { isTruthy } from "@utils/guards";
 import { Margins } from "@utils/margins";
 import { classes } from "@utils/misc";
@@ -60,7 +60,15 @@ function DelexoNameLink() {
         <Clickable
             tag="span"
             className="vc-delexo-plugins-author"
-            onClick={() => { void openUserProfile(DELEXO_USER_ID); }}
+            onClick={() => {
+                if (user) {
+                    openContributorModal(user);
+                    return;
+                }
+                void UserUtils.getUser(DELEXO_USER_ID)
+                    .then(fetched => { if (fetched) openContributorModal(fetched); })
+                    .catch(() => undefined);
+            }}
             aria-label="Open Delexo's Discord profile"
         >
             <img className="vc-delexo-plugins-pfp" src={avatar} alt="" />

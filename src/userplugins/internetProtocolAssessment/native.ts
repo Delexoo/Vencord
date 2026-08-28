@@ -7,6 +7,7 @@
  * Allowed targets: localhost and private LAN addresses only.
  */
 
+import { CspPolicies } from "@main/csp";
 import { spawn, spawnSync, type ChildProcess } from "child_process";
 import { app, IpcMainInvokeEvent, shell } from "electron";
 import { existsSync, mkdirSync, openSync } from "fs";
@@ -15,6 +16,17 @@ import { request as httpsRequest } from "https";
 import { homedir } from "os";
 import { dirname, join } from "path";
 import { URL } from "url";
+
+const MAP_CSP = ["frame-src", "child-src", "img-src", "script-src", "style-src", "connect-src"];
+CspPolicies["maps.google.com"] = MAP_CSP;
+CspPolicies["www.google.com"] = MAP_CSP;
+CspPolicies["maps.gstatic.com"] = MAP_CSP;
+CspPolicies["*.googleapis.com"] = MAP_CSP;
+CspPolicies["*.gstatic.com"] = MAP_CSP;
+CspPolicies["*.google.com"] = MAP_CSP;
+CspPolicies["*.ggpht.com"] = MAP_CSP;
+
+const geoLookupCache = new Map<string, Record<string, unknown>>();
 
 let captureChild: ChildProcess | null = null;
 
@@ -234,6 +246,86 @@ export async function listFolders() {
     for (const key of FOLDER_KEYS)
         data[key] = folderPath(key);
     return { ok: true, data };
+}
+
+function isPublicLookupTarget(value: string): boolean {
+    const v = String(value || "").trim().toLowerCase();
+    if (!v || v === "-" || v.length > 253) return false;
+    if (isPrivateOrLocalHost(v)) return false;
+    if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(v)) return true;
+    if (v.includes(":") && /^[0-9a-f:]+$/.test(v)) return true;
+    return /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(v);
+}
+
+function geoLabel(payload: Record<string, unknown>): string {
+    const parts = [payload.city, payload.regionName, payload.countryCode || payload.country]
+        .map(v => String(v || "").trim())
+        .filter(Boolean);
+    return parts.join(", ");
+}
+
+export async function lookupGeo(_: IpcMainInvokeEvent, rawTarget: string) {
+    const target = String(rawTarget || "").trim();
+    if (!isPublicLookupTarget(target))
+        return { ok: false, error: "Private or invalid address." };
+
+    const cached = geoLookupCache.get(target.toLowerCase());
+    if (cached) return cached;
+
+    try {
+        const body = await getText(
+            `http://ip-api.com/json/${encodeURIComponent(target)}?fields=status,message,city,regionName,country,countryCode,lat,lon,isp,org,as,asname,mobile,proxy,hosting,query`,
+            2500,
+            ""
+        );
+        const payload = JSON.parse(body) as Record<string, unknown>;
+        if (payload.status !== "success") {
+            const failed = { ok: false, error: String(payload.message || "Geo lookup failed.") };
+            geoLookupCache.set(target.toLowerCase(), failed);
+            return failed;
+        }
+        const location = geoLabel(payload) || "Unknown";
+        const result = {
+            ok: true,
+            ip: String(payload.query || target),
+            location,
+            city: payload.city ? String(payload.city) : null,
+            region: payload.regionName ? String(payload.regionName) : null,
+            country: payload.country ? String(payload.country) : null,
+            countryCode: payload.countryCode ? String(payload.countryCode) : null,
+            latitude: typeof payload.lat === "number" ? payload.lat : null,
+            longitude: typeof payload.lon === "number" ? payload.lon : null,
+            isp: payload.isp ? String(payload.isp) : null,
+            org: payload.org ? String(payload.org) : null,
+            asn: payload.as ? String(payload.as) : null,
+            asname: payload.asname ? String(payload.asname) : null,
+            mobile: typeof payload.mobile === "boolean" ? payload.mobile : null,
+            proxy: typeof payload.proxy === "boolean" ? payload.proxy : null,
+            hosting: typeof payload.hosting === "boolean" ? payload.hosting : null,
+            scope: "Public"
+        };
+        geoLookupCache.set(target.toLowerCase(), result);
+        return result;
+    } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+}
+
+export async function openMap(_: IpcMainInvokeEvent, rawQuery: string) {
+    const q = String(rawQuery || "").trim();
+    if (!q || q.length > 400) return { ok: false, error: "Invalid map query." };
+
+    let url = "";
+    if (/^https:\/\/(?:www\.)?google\.com\/maps\b/i.test(q) || /^https:\/\/maps\.google\.com\b/i.test(q)) {
+        url = q;
+    } else if (/^-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?$/.test(q) || /^[A-Za-z0-9 .,'()\-/:+]{1,180}$/.test(q)) {
+        url = `https://www.google.com/maps?q=${encodeURIComponent(q)}`;
+    } else {
+        return { ok: false, error: "Map query was rejected." };
+    }
+
+    await shell.openExternal(url);
+    return { ok: true, data: url };
 }
 
 export async function openFolder(_: IpcMainInvokeEvent, rawKey: string) {

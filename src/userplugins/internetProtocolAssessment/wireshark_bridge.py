@@ -32,6 +32,7 @@ import threading
 from collections import OrderedDict
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+from urllib.request import Request, urlopen
 
 try:
     import geoip2.database  # optional: pip install geoip2
@@ -187,6 +188,14 @@ def geo_for_ip(value: str):
 
     cached = geo_cache.get(value)
     if cached is not None:
+        if (
+            cached.get("latitude") is None
+            and not cached.get("_httpPending")
+            and not cached.get("_httpTried")
+            and cached.get("scope") == "Public"
+        ):
+            cached["_httpPending"] = True
+            threading.Thread(target=http_geo_fill, args=(value,), daemon=True).start()
         return cached
 
     result = {
@@ -219,7 +228,52 @@ def geo_for_ip(value: str):
             pass
 
     geo_cache[value] = result
+    if result.get("latitude") is None:
+        result["_httpPending"] = True
+        threading.Thread(target=http_geo_fill, args=(value,), daemon=True).start()
     return result
+
+
+def http_geo_fill(value: str):
+    try:
+        req = Request(
+            f"http://ip-api.com/json/{value}?fields=status,city,regionName,country,countryCode,lat,lon,isp,org,as",
+            headers={"User-Agent": "InternetProtocolAssessment/1.0"},
+        )
+        with urlopen(req, timeout=1.5) as resp:
+            payload = json.loads(resp.read().decode("utf-8", "replace"))
+        current = dict(geo_cache.get(value) or {})
+        current["_httpPending"] = False
+        current["_httpTried"] = True
+        if payload.get("status") != "success":
+            geo_cache[value] = current
+            return
+        current.update({
+            "scope": "Public",
+            "city": payload.get("city"),
+            "region": payload.get("regionName"),
+            "country": payload.get("country"),
+            "countryCode": payload.get("countryCode"),
+            "latitude": payload.get("lat"),
+            "longitude": payload.get("lon"),
+            "isp": payload.get("isp"),
+            "org": payload.get("org"),
+            "as": payload.get("as"),
+        })
+        geo_cache[value] = current
+        with state_lock:
+            for conn in state["connections"].values():
+                if conn.get("dst") == value:
+                    conn["dstGeo"] = current
+                    conn["dstLocation"] = geo_label(current)
+                if conn.get("src") == value:
+                    conn["srcGeo"] = current
+                    conn["srcLocation"] = geo_label(current)
+    except Exception:
+        current = dict(geo_cache.get(value) or {})
+        current["_httpPending"] = False
+        current["_httpTried"] = True
+        geo_cache[value] = current
 
 
 def geo_label(geo: dict) -> str:
