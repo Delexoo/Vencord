@@ -439,3 +439,133 @@
     .vc-ipa-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .vc-ipa-capture-meta { grid-template-columns: 1fr; }
 }
+
+.vc-ipa-forensic-kpis {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 7px;
+    margin-bottom: 10px;
+}
+
+.vc-ipa-protocol-columns {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    margin: 10px 0 12px;
+}
+
+.vc-ipa-counter-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+    gap: 5px;
+    margin-top: 6px;
+}
+
+.vc-ipa-counter-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 7px;
+    padding: 6px 7px;
+    border: 1px solid var(--background-modifier-accent, rgba(255, 255, 255, 0.08));
+    border-radius: 7px;
+    background: var(--background-tertiary, rgba(0, 0, 0, 0.18));
+    font-size: 10px;
+}
+
+.vc-ipa-table-scroll {
+    width: 100%;
+    overflow-x: auto;
+    border-radius: 8px;
+}
+
+.vc-ipa-flow-table-deep {
+    min-width: 1680px;
+}
+
+.vc-ipa-flow-table-deep .vc-ipa-flow-header,
+.vc-ipa-flow-table-deep .vc-ipa-flow-row {
+    grid-template-columns:
+        115px
+        minmax(165px, 1fr)
+        minmax(165px, 1fr)
+        62px
+        95px
+        130px
+        220px
+        170px
+        190px
+        185px
+        minmax(260px, 1.4fr);
+}
+
+.vc-ipa-packet-table {
+    min-width: 1280px;
+    overflow: hidden;
+    border: 1px solid var(--background-modifier-accent, rgba(255, 255, 255, 0.08));
+    border-radius: 8px;
+}
+
+.vc-ipa-packet-header,
+.vc-ipa-packet-row {
+    display: grid;
+    grid-template-columns:
+        60px
+        72px
+        115px
+        minmax(170px, 1fr)
+        minmax(170px, 1fr)
+        55px
+        minmax(180px, 1fr)
+        minmax(290px, 1.6fr);
+    gap: 8px;
+    align-items: center;
+    padding: 7px 9px;
+}
+
+.vc-ipa-packet-header {
+    background: var(--background-tertiary, rgba(0, 0, 0, 0.18));
+    color: var(--text-muted, #949ba4);
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+}
+
+.vc-ipa-packet-row {
+    border-top: 1px solid var(--background-modifier-accent, rgba(255, 255, 255, 0.08));
+    font-size: 10px;
+}
+
+.vc-ipa-packet-row > * {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vc-ipa-packet-row:hover,
+.vc-ipa-flow-row:hover {
+    background: var(--background-modifier-hover, rgba(255, 255, 255, 0.06));
+}
+
+.vc-ipa-user-tooltip {
+    width: 410px;
+    max-width: min(410px, 82vw);
+}
+
+.vc-ipa-folder-btns {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+@media (max-width: 800px) {
+    .vc-ipa-forensic-kpis {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .vc-ipa-protocol-columns {
+        grid-template-columns: 1fr;
+    }
+}

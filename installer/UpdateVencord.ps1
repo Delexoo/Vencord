@@ -267,19 +267,32 @@ try {
             Write-Log "GitHub plugin pull failed - $($_.Exception.Message)"
         }
 
-        $fallbackRoots = @(
-            (Join-Path $env:USERPROFILE "OneDrive\Desktop\SpyT\vencord-plugins"),
-            (Join-Path $env:USERPROFILE "Desktop\SpyT\vencord-plugins"),
+        $desktopRoots = @(
             (Join-Path $env:USERPROFILE "OneDrive\Desktop\Vencord\src\userplugins"),
-            (Join-Path $env:USERPROFILE "Desktop\Vencord\src\userplugins"),
-            $PluginsMirror
+            (Join-Path $env:USERPROFILE "Desktop\Vencord\src\userplugins")
         )
 
         $sourceRoot = $null
-        if ($pulled) {
+        foreach ($candidate in $desktopRoots) {
+            $probe = Join-Path $candidate "internetProtocolAssessment\index.tsx"
+            if (Test-Path -LiteralPath $probe) {
+                $sourceRoot = $candidate
+                Write-Log "Using Desktop plugin source $sourceRoot"
+                break
+            }
+        }
+
+        if (-not $sourceRoot -and $pulled) {
             $sourceRoot = Join-Path $tmp "src\userplugins"
             Write-Log "Using GitHub plugin source $sourceRoot"
-        } else {
+        }
+
+        if (-not $sourceRoot) {
+            $fallbackRoots = @(
+                (Join-Path $env:USERPROFILE "OneDrive\Desktop\SpyT\vencord-plugins"),
+                (Join-Path $env:USERPROFILE "Desktop\SpyT\vencord-plugins"),
+                $PluginsMirror
+            )
             foreach ($candidate in $fallbackRoots) {
                 $probe = Join-Path $candidate "audioCapture"
                 if (Test-Path -LiteralPath $probe) {

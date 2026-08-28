@@ -8,14 +8,18 @@
  */
 
 import { spawn, spawnSync, type ChildProcess } from "child_process";
-import { app, IpcMainInvokeEvent } from "electron";
-import { existsSync, openSync } from "fs";
+import { app, IpcMainInvokeEvent, shell } from "electron";
+import { existsSync, mkdirSync, openSync } from "fs";
 import { request as httpRequest } from "http";
 import { request as httpsRequest } from "https";
+import { homedir } from "os";
 import { dirname, join } from "path";
 import { URL } from "url";
 
 let captureChild: ChildProcess | null = null;
+
+const FOLDER_KEYS = ["plugin", "captures", "settings", "log", "appDataDist", "delexooDist"] as const;
+type FolderKey = typeof FOLDER_KEYS[number];
 
 function isPrivateOrLocalHost(host: string): boolean {
     const h = host.toLowerCase().replace(/^\[|\]$/g, "");
@@ -125,14 +129,17 @@ function findBridgeScript(userPath: string): string {
     if (custom && existsSync(custom)) return custom;
 
     const rel = join("src", "userplugins", "internetProtocolAssessment", "wireshark_bridge.py");
+    const localApp = process.env.LOCALAPPDATA || "";
     const roots = [
         join(__dirname, ".."),
         join(__dirname, "../.."),
         process.cwd(),
         app.getAppPath(),
+        join(app.getPath("home"), "OneDrive", "Desktop", "Vencord"),
+        join(app.getPath("desktop"), "Vencord"),
         join(app.getPath("documents"), "Vencord"),
-        join(app.getPath("desktop"), "Vencord")
-    ];
+        localApp ? join(localApp, "DelexooVencord", "Vencord") : ""
+    ].filter(Boolean);
     for (const root of roots) {
         const full = join(root, rel);
         if (existsSync(full)) return full;
@@ -193,13 +200,68 @@ function stopChild() {
     try { child.kill(); } catch { /* ignore */ }
 }
 
+function folderPath(key: FolderKey): string {
+    switch (key) {
+        case "plugin":
+            try {
+                return dirname(findBridgeScript(""));
+            } catch {
+                return join(app.getPath("home"), "OneDrive", "Desktop", "Vencord", "src", "userplugins", "internetProtocolAssessment");
+            }
+        case "captures":
+            return join(homedir(), "WiresharkCaptures");
+        case "settings":
+            return join(app.getPath("appData"), "Vencord", "settings");
+        case "log":
+            return app.getPath("temp");
+        case "appDataDist":
+            return join(app.getPath("appData"), "Vencord", "dist");
+        case "delexooDist": {
+            const localApp = process.env.LOCALAPPDATA || "";
+            return localApp
+                ? join(localApp, "DelexooVencord", "Vencord", "dist")
+                : join(homedir(), "DelexooVencord", "Vencord", "dist");
+        }
+        default: {
+            const _never: never = key;
+            return _never;
+        }
+    }
+}
+
+export async function listFolders() {
+    const data: Record<string, string> = {};
+    for (const key of FOLDER_KEYS)
+        data[key] = folderPath(key);
+    return { ok: true, data };
+}
+
+export async function openFolder(_: IpcMainInvokeEvent, rawKey: string) {
+    const key = String(rawKey || "") as FolderKey;
+    if (!(FOLDER_KEYS as readonly string[]).includes(key))
+        return { ok: false, data: "Unknown folder." };
+
+    try {
+        const dir = folderPath(key);
+        if (key === "captures" || key === "plugin")
+            mkdirSync(dir, { recursive: true });
+        if (!existsSync(dir))
+            return { ok: false, data: `Folder does not exist: ${dir}` };
+        await shell.openPath(dir);
+        return { ok: true, data: dir };
+    } catch (e) {
+        return { ok: false, data: e instanceof Error ? e.message : String(e) };
+    }
+}
+
 export async function startCapture(
     _: IpcMainInvokeEvent,
     rawUrl: string,
     token = "",
     interfaceName = "",
     scriptPath = "",
-    geoDb = ""
+    geoDb = "",
+    authorizedDevicesPath = ""
 ) {
     const base = String(rawUrl || "http://127.0.0.1:8765").replace(/\/+$/, "");
     if (!isAllowedBridge(base))
@@ -223,6 +285,10 @@ export async function startCapture(
             if (!existsSync(geo)) throw new Error("GeoIP database path does not exist.");
             args.push("--geo-db", geo);
         }
+        const devices = String(authorizedDevicesPath || "").trim()
+            || join(dirname(script), "authorized_devices.example.json");
+        if (devices && existsSync(devices))
+            args.push("--authorized-devices", devices);
 
         const logFile = join(app.getPath("temp"), "ipa-wireshark-bridge.log");
         const logFd = openSync(logFile, "w");
