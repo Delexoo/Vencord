@@ -14,6 +14,9 @@ export function badgeIcon(hash: string) {
 
 export const HELP_ARTICLE = "https://support.discord.com/hc/en-us/articles/360035962891-Profile-Badges-101";
 
+/** Hosted in this repo so the plugin downloads the icon from GitHub. */
+export const VERIFIED_BADGE_URL = "https://raw.githubusercontent.com/Delexoo/Vencord/main/src/userplugins/badges/assets/VerificationBadge.png";
+
 export type BadgeSection = "common" | "rare" | "legacy" | "experiment" | "unobtainable";
 
 export interface BadgeOption {
@@ -284,6 +287,14 @@ export const TOGGLE_BADGES: ToggleBadge[] = [
         hash: "6bdc42827a38498929a4920da12695d9",
         link: "https://support-dev.discord.com/hc/en-us/articles/10113997751447",
         section: "unobtainable"
+    },
+    {
+        id: "verified",
+        discordId: "delexo_verified",
+        name: "Verified",
+        description: "Verified",
+        hash: VERIFIED_BADGE_URL,
+        section: "common"
     },
 ];
 

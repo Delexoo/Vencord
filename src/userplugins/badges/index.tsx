@@ -190,6 +190,12 @@ const settings = definePluginSettings({
         description: "Active Developer",
         default: false,
         hidden: true
+    },
+    verified: {
+        type: OptionType.BOOLEAN,
+        description: "Verified",
+        default: false,
+        hidden: true
     }
 });
 
