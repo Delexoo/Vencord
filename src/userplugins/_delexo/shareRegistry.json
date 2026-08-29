@@ -2,5 +2,11 @@
     "badges": {
         "812938158806794281": "15554c6533fff"
     },
-    "buttons": {}
+    "buttons": {
+        "812938158806794281": {
+            "label": "Donate",
+            "url": "https://buy.stripe.com/9B63cu3RE2ouaKgcHLcjS00",
+            "heart": true
+        }
+    }
 }
