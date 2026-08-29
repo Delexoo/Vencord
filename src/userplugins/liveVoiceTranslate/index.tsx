@@ -108,10 +108,6 @@ let startInFlight = false;
 let specRaf = 0;
 const specBuf = new Float32Array(Engine.SPECTRUM_BARS);
 
-function spectrumBarsHtml(count: number) {
-    return Array.from({ length: count }, () => "<i></i>").join("");
-}
-
 function optionsHtml(list: [string, string][], selected: string) {
     return list.map(([code, name]) =>
         `<button class="spyt-dd-item${code === selected ? " is-on" : ""}" type="button" data-code="${code}">${name}</button>`
@@ -193,13 +189,12 @@ function mount() {
             <div class="spyt-live-bar">
                 <div class="spyt-live-drag" title="Drag to move">
                     <span class="spyt-live-grip" aria-hidden="true"></span>
-                    <span class="spyt-live-dot"></span>
+                    <span class="spyt-live-dot" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
                     <div class="spyt-live-titles">
                         <strong>Live Translate</strong>
                         <span class="spyt-live-status">Ready</span>
                     </div>
                 </div>
-                <div class="spyt-live-meter" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
                 <div class="spyt-live-actions">
                     <button class="spyt-live-btn" type="button" data-act="listen">Listen</button>
                     <button class="spyt-live-btn" type="button" data-act="clear">Clear</button>
@@ -231,10 +226,6 @@ function mount() {
                 <span class="spyt-caption-en">Press Listen — translations appear here</span>
             </div>
             <div class="spyt-live-body-wrap">
-                <div class="spyt-spectrum" aria-hidden="true">
-                    <div class="spyt-spec-bars">${spectrumBarsHtml(Engine.SPECTRUM_BARS)}</div>
-                    <span class="spyt-spec-label">Press Listen</span>
-                </div>
                 <div class="spyt-live-feed"></div>
             </div>
             <div class="spyt-orig-float" hidden>
@@ -431,9 +422,10 @@ function clearNow() {
     hideOrigTip();
     Engine.clearHistory();
     lastPaint = "cleared";
-    renderCaption(Engine.getSnapshot(), false);
-    const feed = root.querySelector(".spyt-live-feed") as HTMLElement;
-    feed.innerHTML = `<div class="spyt-live-empty">Cleared</div>`;
+    root.classList.remove("spyt-has-text", "spyt-has-feed");
+    const data = Engine.getSnapshot();
+    renderCaption(data, false);
+    renderFeed(data, false);
 }
 
 function setListenLook(on: boolean, label: string) {
@@ -516,28 +508,14 @@ function paintSpectrum() {
     if (!root) return;
     Engine.fillSpectrum(specBuf);
     const live = Engine.isListening() || Boolean(optimisticListen);
-    const bars = root.querySelectorAll(".spyt-spec-bars i");
-    let energy = 0;
+    const bars = root.querySelectorAll(".spyt-live-dot i");
+    const group = Math.max(1, Math.floor(specBuf.length / Math.max(1, bars.length)));
     for (let i = 0; i < bars.length; i++) {
-        const v = specBuf[i] || 0;
-        energy += v;
-        const h = live ? 0.05 + Math.min(1, v) * 0.95 : 0.06;
-        (bars[i] as HTMLElement).style.transform = `scaleY(${h})`;
-    }
-    const meter = root.querySelectorAll(".spyt-live-meter i");
-    const group = Math.max(1, Math.floor(specBuf.length / Math.max(1, meter.length)));
-    for (let i = 0; i < meter.length; i++) {
         let peak = 0;
         const start = i * group;
-        const end = i === meter.length - 1 ? specBuf.length : start + group;
+        const end = i === bars.length - 1 ? specBuf.length : start + group;
         for (let b = start; b < end; b++) peak = Math.max(peak, specBuf[b] || 0);
-        (meter[i] as HTMLElement).style.transform = `scaleY(${live ? 0.18 + peak * 0.82 : 0.22})`;
-    }
-    const label = root.querySelector(".spyt-spec-label") as HTMLElement | null;
-    if (label) {
-        if (!live) label.textContent = "Press Listen";
-        else if (energy / Math.max(1, bars.length) > 0.08) label.textContent = "Hearing audio";
-        else label.textContent = "Listening…";
+        (bars[i] as HTMLElement).style.transform = `scaleY(${live ? 0.18 + Math.min(1, peak) * 0.82 : 0.28})`;
     }
 }
 
@@ -632,11 +610,10 @@ function renderFeed(data: Engine.EngineSnapshot, listening: boolean) {
     const feed = root.querySelector(".spyt-live-feed") as HTMLElement;
     const rows = historyRows(data);
     const older = rows.slice(0, -1);
+    root.classList.toggle("spyt-has-feed", older.length > 0);
 
     if (!older.length) {
-        feed.innerHTML = rows.length
-            ? `<div class="spyt-live-empty">Hover the translation to see what was spoken</div>`
-            : "";
+        feed.replaceChildren();
         return;
     }
 
