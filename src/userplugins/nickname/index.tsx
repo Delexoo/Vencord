@@ -307,12 +307,12 @@ let pendingTimer = 0;
 function queueNodes(nodes: Node[]) {
     pending.push(...nodes);
     if (pendingTimer) return;
-    pendingTimer = requestAnimationFrame(() => {
+    pendingTimer = window.setTimeout(() => {
         pendingTimer = 0;
         const batch = pending;
         pending = [];
         try { scanNodes(batch); } catch { /* ignore */ }
-    });
+    }, 40);
 }
 
 function startObserver() {
@@ -323,6 +323,12 @@ function startObserver() {
         const nodes: Node[] = [];
         for (const rec of records) {
             if (rec.type === "characterData") {
+                const text = rec.target.nodeValue ?? "";
+                if (text.length > MAX_LEN + 12) continue;
+                if (
+                    real.username && !text.includes(real.username) &&
+                    real.globalName && !text.includes(real.globalName)
+                ) continue;
                 const parent = rec.target.parentNode;
                 if (parent && !skipNode(parent)) nodes.push(parent);
                 continue;
@@ -499,7 +505,7 @@ export default definePlugin({
         running = false;
         if (liveRaf) cancelAnimationFrame(liveRaf);
         liveRaf = 0;
-        if (pendingTimer) cancelAnimationFrame(pendingTimer);
+        if (pendingTimer) clearTimeout(pendingTimer);
         pendingTimer = 0;
         observer?.disconnect();
         observer = null;

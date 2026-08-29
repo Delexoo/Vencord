@@ -5,6 +5,7 @@
  */
 
 import { Delexo } from "../_delexo/author";
+import { mutationClassMatches, scheduleOnce } from "../_delexo/idle";
 import ErrorBoundary from "@components/ErrorBoundary";
 import definePlugin from "@utils/types";
 import { createRoot } from "@webpack/common";
@@ -16,23 +17,33 @@ import managedStyle from "./style.css?managed";
 export { settings };
 
 const HOST_ID = "vc-mentions-dom-nav";
+const NAV_RE = /privateChannels|quests|sidebar/;
 
 let domHost: HTMLDivElement | null = null;
 let domRoot: Root | null = null;
 let domObserver: MutationObserver | null = null;
-let placeQueued = false;
+const placeNav = scheduleOnce(150);
+
+let cachedQuests: HTMLElement | null = null;
 
 function findQuestsRow(): HTMLElement | null {
+    if (cachedQuests?.isConnected) return cachedQuests;
+    cachedQuests = null;
     const nodes = document.querySelectorAll<HTMLElement>(
         '[class*="privateChannels"] [class*="link"], [class*="privateChannels"] [class*="channel"], nav [class*="interactive"]'
     );
     for (const el of nodes) {
         const label = (el.textContent || "").replace(/\s+/g, " ").trim();
-        if (/^quests$/i.test(label))
-            return el.closest<HTMLElement>('[class*="channel"], [class*="link"], [role="listitem"], div') || el;
+        if (/^quests$/i.test(label)) {
+            cachedQuests = el.closest<HTMLElement>('[class*="channel"], [class*="link"], [role="listitem"], div') || el;
+            return cachedQuests;
+        }
     }
     const byAria = document.querySelector<HTMLElement>('[aria-label="Quests" i]');
-    if (byAria) return byAria.closest<HTMLElement>('[class*="channel"], [class*="link"], div') || byAria;
+    if (byAria) {
+        cachedQuests = byAria.closest<HTMLElement>('[class*="channel"], [class*="link"], div') || byAria;
+        return cachedQuests;
+    }
     return null;
 }
 
@@ -54,8 +65,6 @@ function removeDomNav() {
 }
 
 function placeDomNav() {
-    placeQueued = false;
-
     const quests = findQuestsRow();
     if (!quests?.parentElement) {
         removeAllMentionsHosts();
@@ -94,10 +103,8 @@ function placeDomNav() {
 }
 
 function queueDomNav() {
-    if (placeQueued) return;
-    placeQueued = true;
-    requestAnimationFrame(() => {
-        try { placeDomNav(); } catch { placeQueued = false; }
+    placeNav.run(() => {
+        try { placeDomNav(); } catch { /* ignore */ }
     });
 }
 
@@ -120,11 +127,15 @@ export default definePlugin({
     start() {
         removeAllMentionsHosts();
         queueDomNav();
-        domObserver = new MutationObserver(() => queueDomNav());
+        domObserver = new MutationObserver(records => {
+            if (mutationClassMatches(records, NAV_RE)) queueDomNav();
+        });
         domObserver.observe(document.body, { childList: true, subtree: true });
     },
 
     stop() {
+        placeNav.cancel();
+        cachedQuests = null;
         domObserver?.disconnect();
         domObserver = null;
         removeDomNav();

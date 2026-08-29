@@ -8,12 +8,21 @@ import { CHOICE_GROUPS, TOGGLE_BADGES, type BadgeOption } from "./catalog";
 
 const PREFIX = "[dlxb:";
 const SUFFIX = "]";
+const ZW_MARK = "\u2060";
+const ZW0 = "\u200b";
+const ZW1 = "\u200c";
+
+function zwPayloadRe() {
+    return /\u2060[\u200b\u200c]+\u2060/g;
+}
 
 export interface ShareState {
     contributor: boolean;
     choices: Record<string, string>;
     toggles: Record<string, boolean>;
 }
+
+export type ShareEncodeMode = "tags" | "zw";
 
 function to3y3(message: string) {
     return Array.from(message)
@@ -29,6 +38,30 @@ function hiddenAscii(text: string) {
         .filter(cp => cp >= 0xe0020 && cp <= 0xe007f)
         .map(cp => String.fromCodePoint(cp - 0xe0000))
         .join("");
+}
+
+function toZw(message: string) {
+    let bits = "";
+    for (const ch of message) {
+        const n = ch.charCodeAt(0) & 0xff;
+        for (let i = 7; i >= 0; i--) bits += (n >> i) & 1 ? ZW1 : ZW0;
+    }
+    return ZW_MARK + bits + ZW_MARK;
+}
+
+function fromZw(text: string) {
+    let out = "";
+    for (const chunk of text.match(zwPayloadRe()) ?? []) {
+        const bits = chunk.slice(1, -1);
+        for (let i = 0; i + 8 <= bits.length; i += 8) {
+            let n = 0;
+            for (let b = 0; b < 8; b++) {
+                if (bits[i + b] === ZW1) n |= 1 << (7 - b);
+            }
+            if (n >= 0x20 && n <= 0x7f) out += String.fromCharCode(n);
+        }
+    }
+    return out;
 }
 
 export function emptyShareState(): ShareState {
@@ -86,23 +119,39 @@ export function stateToOptions(state: ShareState): BadgeOption[] {
     return out;
 }
 
-export function encodeShare(state: ShareState): string {
+export function encodeShare(state: ShareState, mode: ShareEncodeMode = "tags"): string {
     const packed = packState(state);
     if (packed === "0") return "";
-    return to3y3(`${PREFIX}${packed}${SUFFIX}`);
+    const payload = `${PREFIX}${packed}${SUFFIX}`;
+    switch (mode) {
+        case "zw":
+            return toZw(payload);
+        case "tags":
+            return to3y3(payload);
+        default: {
+            const _: never = mode;
+            return _;
+        }
+    }
+}
+
+function hexFromText(text: string) {
+    const match = text.match(/\[dlxb:([0-9a-f]+)\]/i);
+    return match?.[1] ?? null;
 }
 
 export function decodeShare(bio: string | undefined | null): ShareState | null {
     if (!bio) return null;
-    const ascii = hiddenAscii(bio);
-    const match = ascii.match(/\[dlxb:([0-9a-f]+)\]/i);
-    if (!match) return null;
-    return unpackState(match[1]);
+    const hex = hexFromText(hiddenAscii(bio))
+        ?? hexFromText(fromZw(bio))
+        ?? hexFromText(bio);
+    if (!hex) return null;
+    return unpackState(hex);
 }
 
-export function writeShare(bio: string, state: ShareState): string {
+export function writeShare(bio: string, state: ShareState, mode: ShareEncodeMode = "tags"): string {
     const without = stripShare(bio);
-    const encoded = encodeShare(state);
+    const encoded = encodeShare(state, mode);
     if (!encoded) return without.trimEnd();
     const base = without.replace(/\s+$/g, "");
     return base ? `${base} ${encoded}` : encoded;
@@ -123,7 +172,7 @@ export function stripShare(bio: string): string {
         buf = "";
         ascii = "";
     };
-    for (const ch of bio) {
+    for (const ch of bio.replace(zwPayloadRe(), "")) {
         const cp = ch.codePointAt(0) ?? 0;
         if (cp >= 0xe0020 && cp <= 0xe007f) {
             buf += ch;
@@ -134,7 +183,7 @@ export function stripShare(bio: string): string {
         out += ch;
     }
     flush();
-    return out;
+    return out.replace(/\[dlxb:[0-9a-f]+\]/gi, "");
 }
 
 export function shareHasAnything(state: ShareState) {

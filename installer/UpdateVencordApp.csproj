@@ -5,16 +5,16 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWindowsForms>true</UseWindowsForms>
-    <ApplicationIcon>app.ico</ApplicationIcon>
     <AssemblyName>Vencord Plugins Installer</AssemblyName>
     <RootNamespace>UpdateVencord</RootNamespace>
-    <Version>1.8.1</Version>
+    <Version>1.8.2</Version>
     <Product>Vencord + Delexo Plugins</Product>
     <Description>Installer for official Vencord with Delexo Plugins as addons.</Description>
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <ApplicationIcon Condition="Exists('app.ico')">app.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
     <EmbeddedResource Include="UpdateVencord.ps1" LogicalName="UpdateVencord.ps1" Condition="Exists('UpdateVencord.ps1')" />

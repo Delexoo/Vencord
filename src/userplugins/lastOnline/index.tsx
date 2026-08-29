@@ -5,6 +5,7 @@
  */
 
 import { Delexo } from "../_delexo/author";
+import { mutationClassMatches } from "../_delexo/idle";
 import * as DataStore from "@api/DataStore";
 import { definePluginSettings } from "@api/Settings";
 import definePlugin, { OptionType } from "@utils/types";
@@ -15,6 +16,7 @@ import managedStyle from "./style.css?managed";
 
 const STORE_KEY = "LastOnlineTimestamps";
 const SEEN_KEY = "LastOnlineSeenOnline";
+const UI_PLACE_RE = /title|subtitle|userProfile|userPopout|profilePanel|chat/;
 
 type TipKind = "last" | "unknown";
 
@@ -56,7 +58,7 @@ let profileHost: HTMLElement | null = null;
 let profileRoot: Root | null = null;
 let uiObserver: MutationObserver | null = null;
 let timerHandle: ReturnType<typeof setTimeout> | null = null;
-let placeQueued = false;
+let placeTimer: ReturnType<typeof setTimeout> | null = null;
 /** Last hovered DM row (for live tip refresh while pointer stays put). */
 let tipRow: Element | null = null;
 let tipUserId: string | null = null;
@@ -257,27 +259,25 @@ function findDmHeaderBar(): HTMLElement | null {
     );
 }
 
+let cachedDmLabel: HTMLElement | null = null;
+
 /** Find the window "Direct Messages" / Discord title label to align under. */
 function findDirectMessagesLabel(): HTMLElement | null {
-    const candidates = document.querySelectorAll<HTMLElement>(
-        '[class*="titleBar"] *, [class*="wordmark"] *, [class*="appTitle"] *, [class*="bar"] span, [class*="bar"] div'
-    );
-    for (const el of candidates) {
+    if (cachedDmLabel?.isConnected) return cachedDmLabel;
+    cachedDmLabel = null;
+    const root =
+        document.querySelector<HTMLElement>('[class*="titleBar"]') ||
+        document.querySelector<HTMLElement>('[class*="wordmark"]') ||
+        document.querySelector<HTMLElement>('[class*="appTitle"]');
+    if (!root) return null;
+    for (const el of root.querySelectorAll<HTMLElement>("span, div")) {
         if (el.children.length > 2) continue;
         const t = (el.textContent || "").replace(/\s+/g, " ").trim();
         if (!/^(Direct Messages|Discord)$/i.test(t)) continue;
         const r = el.getBoundingClientRect();
         if (r.width < 40 || r.top > 48 || r.height > 40) continue;
+        cachedDmLabel = el;
         return el;
-    }
-
-    // Fallback: any small top-of-window Direct Messages text
-    for (const el of document.querySelectorAll<HTMLElement>("span, div, h1, h2")) {
-        if (el.children.length > 2) continue;
-        const t = (el.textContent || "").replace(/\s+/g, " ").trim();
-        if (!/^Direct Messages$/i.test(t)) continue;
-        const r = el.getBoundingClientRect();
-        if (r.top <= 48 && r.width > 40 && r.width < 280) return el;
     }
     return null;
 }
@@ -377,12 +377,12 @@ function placeHeaderBadge() {
 
 function findUserIdNear(el: Element | null): string | null {
     let cur: Element | null = el;
-    for (let i = 0; i < 40 && cur; i++) {
+    for (let i = 0; i < 24 && cur; i++) {
         const fiberKey = Object.keys(cur).find(k =>
             k.startsWith("__reactFiber$") || k.startsWith("__reactInternalInstance$")
         );
         let fiber: any = fiberKey ? (cur as any)[fiberKey] : null;
-        for (let d = 0; d < 35 && fiber; d++, fiber = fiber.return) {
+        for (let d = 0; d < 18 && fiber; d++, fiber = fiber.return) {
             const p = fiber.memoizedProps || fiber.pendingProps || {};
             if (p.user?.id) return String(p.user.id);
             if (p.userId) return String(p.userId);
@@ -473,15 +473,16 @@ function placeProfileBadge() {
 }
 
 function placeAllUi() {
-    placeQueued = false;
     try { placeHeaderBadge(); } catch { /* ignore */ }
     try { placeProfileBadge(); } catch { /* ignore */ }
 }
 
 function queueUiPlace() {
-    if (placeQueued) return;
-    placeQueued = true;
-    requestAnimationFrame(() => placeAllUi());
+    if (placeTimer != null) return;
+    placeTimer = setTimeout(() => {
+        placeTimer = null;
+        placeAllUi();
+    }, 120);
 }
 
 function renderTip() {
@@ -703,7 +704,9 @@ export default definePlugin({
         document.addEventListener("pointerover", onPointerOver, true);
         document.addEventListener("pointerout", onPointerOut, true);
 
-        uiObserver = new MutationObserver(() => queueUiPlace());
+        uiObserver = new MutationObserver(records => {
+            if (mutationClassMatches(records, UI_PLACE_RE)) queueUiPlace();
+        });
         uiObserver.observe(document.body, { childList: true, subtree: true });
         window.addEventListener("resize", queueUiPlace);
         queueUiPlace();
@@ -718,10 +721,13 @@ export default definePlugin({
         teardownTipHost();
         uiObserver?.disconnect();
         uiObserver = null;
+        if (placeTimer != null) clearTimeout(placeTimer);
+        placeTimer = null;
         if (timerHandle != null) clearTimeout(timerHandle);
         timerHandle = null;
         tipRow = null;
         tipUserId = null;
+        cachedDmLabel = null;
         removeHeaderBadge();
         removeProfileBadge();
         if (saveTimer != null) clearTimeout(saveTimer);

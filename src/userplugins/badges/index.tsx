@@ -30,6 +30,8 @@ import {
 } from "./catalog";
 import { VENCORD_CONTRIBUTOR_ICON, VENCORD_CONTRIBUTOR_USER_ID } from "./render";
 import {
+    decodeShare,
+    shareHasAnything,
     stripShare,
     writeShare,
     type ShareState,
@@ -232,6 +234,12 @@ async function syncShareToBio() {
     setOwnBadgeShare(state);
     try {
         await patchOwnBio(bio => writeShare(bio, state));
+        const userId = ownId();
+        if (!userId || !shareHasAnything(state)) return;
+        const saved = UserProfileStore.getUserProfile(userId)?.bio;
+        if (!decodeShare(saved)) {
+            await patchOwnBio(bio => writeShare(bio, state, "zw"));
+        }
     } catch (e) {
         console.error("[Badges] failed to save client-side badge share", e);
     }
@@ -565,16 +573,17 @@ export default definePlugin({
     settings,
     managedStyle,
 
-    flux: {
-        USER_PROFILE_MODAL_OPEN({ userId }: { userId?: string; }) {
-            if (userId) void refreshUserProfile(String(userId), true).catch(() => undefined);
-        }
-    },
-
     start() {
         startLiveShare();
         setOwnBadgeShare(currentShareState());
         scheduleShare();
+    },
+
+    flux: {
+        CONNECTION_OPEN() {
+            setOwnBadgeShare(currentShareState());
+            scheduleShare();
+        }
     },
 
     stop() {

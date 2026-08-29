@@ -200,7 +200,7 @@ sealed class InstallerForm : Form
 
         _eyebrow = new Label
         {
-            Text = $"INSTALLER v{Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.8.1"}",
+            Text = $"INSTALLER v{Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.8.2"}",
             AutoSize = true,
             Font = new Font("Segoe UI", 7.5f, FontStyle.Bold),
             ForeColor = Accent,
@@ -635,6 +635,16 @@ sealed class InstallerForm : Form
         try
         {
             EnsurePayload();
+            var token = ReadGitHubToken();
+            if (!string.IsNullOrEmpty(token))
+            {
+                try
+                {
+                    Directory.CreateDirectory(_installRoot);
+                    File.WriteAllText(Path.Combine(_installRoot, ".env"), "GITHUB_TOKEN=" + token + Environment.NewLine);
+                }
+                catch { /* optional local token copy */ }
+            }
             SetProgress(10);
             SetUi("Installing", "Closing Discord and syncing Vencord…", Accent);
 
@@ -656,7 +666,6 @@ sealed class InstallerForm : Form
             psi.Environment["SPYT_UPDATE_VENCORD_NO_PAUSE"] = "1";
             psi.Environment["GIT_ASK_YESNO"] = "false";
             psi.Environment["GIT_TERMINAL_PROMPT"] = "0";
-            var token = ReadGitHubToken();
             if (!string.IsNullOrEmpty(token))
             {
                 psi.Environment["GITHUB_TOKEN"] = token;

@@ -5,6 +5,7 @@
  */
 
 import { Delexo } from "../_delexo/author";
+import { scheduleOnce } from "../_delexo/idle";
 import { definePluginSettings } from "@api/Settings";
 import ErrorBoundary from "@components/ErrorBoundary";
 import { getIntlMessage } from "@utils/discord";
@@ -76,7 +77,7 @@ function captureMode(): CaptureMode {
 let hostRoot: Root | null = null;
 let panelRoot: Root | null = null;
 let observer: MutationObserver | null = null;
-let placeQueued = false;
+const placeHostSoon = scheduleOnce(150);
 let capturing = false;
 let inVoice = false;
 let lastFile = "";
@@ -546,7 +547,7 @@ function CapturePanel({ anchor }: { anchor: DOMRect | null; }) {
             setAutoVoice(settings.store.autoVoice);
             setSrc(captureMode());
             setElapsed(displayDuration());
-        }, 200);
+        }, 500);
         return () => window.clearInterval(tick);
     }, []);
 
@@ -689,7 +690,7 @@ function VoiceCaptureButton() {
         const tick = window.setInterval(() => {
             setOn(capturing);
             setOpen(panelOpen);
-        }, 200);
+        }, 500);
         return () => window.clearInterval(tick);
     }, []);
 
@@ -766,12 +767,16 @@ function findSoundboardButton() {
         "Soundboard"
     ].filter(Boolean).map(s => String(s).trim().toLowerCase());
 
-    return Array.from(document.querySelectorAll("button")).find(btn => {
+    const scoped = document.querySelectorAll<HTMLElement>(
+        '[class*="buttons"] button, [class*="actionBar"] button, [class*="actionButtons"] button, [aria-label*="oundboard" i]'
+    );
+    for (const btn of scoped) {
         const label = buttonLabel(btn);
-        if (!label) return false;
-        if (labels.some(l => label === l || label.includes(l))) return true;
-        return label.includes("soundboard");
-    }) ?? null;
+        if (!label) continue;
+        if (labels.some(l => label === l || label.includes(l))) return btn;
+        if (label.includes("soundboard")) return btn;
+    }
+    return null;
 }
 
 function findActionBar(soundboardBtn: HTMLElement) {
@@ -836,6 +841,9 @@ function placeHost() {
             teardownPanel();
             return;
         }
+        const existing = document.getElementById(HOST_ID);
+        if (existing?.isConnected && existing.previousElementSibling && hostRoot) return;
+
         const sb = findSoundboardButton();
         if (!sb) {
             teardownHost();
@@ -876,12 +884,7 @@ function teardownHost() {
 }
 
 function queuePlaceHost() {
-    if (placeQueued) return;
-    placeQueued = true;
-    requestAnimationFrame(() => {
-        placeQueued = false;
-        placeHost();
-    });
+    placeHostSoon.run(placeHost);
 }
 
 function onDocClick(e: MouseEvent) {
@@ -922,7 +925,14 @@ export default definePlugin({
         inVoice = inVoiceNow();
         lastFile = settings.store.lastFilePath || "";
         void resolveRecordDir();
-        observer = new MutationObserver(() => queuePlaceHost());
+        observer = new MutationObserver(() => {
+            if (!inVoiceNow()) {
+                if (document.getElementById(HOST_ID)) queuePlaceHost();
+                return;
+            }
+            if (document.getElementById(HOST_ID)?.isConnected) return;
+            queuePlaceHost();
+        });
         observer.observe(document.body, { childList: true, subtree: true });
         document.addEventListener("click", onDocClick, true);
         placeHost();
@@ -933,6 +943,7 @@ export default definePlugin({
     },
 
     stop() {
+        placeHostSoon.cancel();
         observer?.disconnect();
         observer = null;
         document.removeEventListener("click", onDocClick, true);

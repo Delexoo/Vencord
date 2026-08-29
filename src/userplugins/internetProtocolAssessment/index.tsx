@@ -147,7 +147,9 @@ let dragging = false;
 let dragOffset = { x: 0, y: 0 };
 let overlayResize: OverlayEdge | null = null;
 let resizeStart = { x: 0, y: 0, left: 0, top: 0, width: 0, height: 0 };
-let pollHandle: ReturnType<typeof setInterval> | null = null;
+let pollHandle: ReturnType<typeof setTimeout> | null = null;
+let refreshBusy = false;
+let lastPaintSig = "";
 let resizeBound = false;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -746,7 +748,7 @@ const EMPTY_WIRESHARK: WiresharkSnapshot = {
 };
 
 let wiresharkSnapshot: WiresharkSnapshot = EMPTY_WIRESHARK;
-let wiresharkHandle: ReturnType<typeof setInterval> | null = null;
+let wiresharkHandle: ReturnType<typeof setTimeout> | null = null;
 let captureBusy = false;
 let lastCaptureMessage = "";
 let lastStartAttempt = 0;
@@ -905,6 +907,12 @@ async function fetchOneSnapshot(base: string, token: string): Promise<WiresharkS
 }
 
 async function fetchWiresharkSnapshot() {
+    const inVoice = inVoiceNow();
+    if (!inVoice && !wiresharkSnapshot.running && !captureBusy) {
+        scheduleWirePoll();
+        return;
+    }
+
     const base = String(settings.store.wiresharkBridgeUrl || "http://127.0.0.1:8765")
         .replace(/\/+$/, "");
     const token = String(settings.store.bridgeToken || "").trim();
@@ -922,7 +930,7 @@ async function fetchWiresharkSnapshot() {
         };
     }
 
-    if (deviceB && deviceB !== base) {
+    if (deviceB && deviceB !== base && (inVoice || wiresharkSnapshot.running)) {
         try {
             const other = await fetchOneSnapshot(deviceB, token);
             deviceBStatus = other?.running
@@ -931,11 +939,12 @@ async function fetchWiresharkSnapshot() {
         } catch {
             deviceBStatus = "Offline";
         }
-    } else {
+    } else if (!deviceB || deviceB === base) {
         deviceBStatus = "-";
     }
 
     paint();
+    if (mount) scheduleWirePoll();
 }
 
 async function startLocalCapture() {
@@ -1256,41 +1265,41 @@ function pickVoiceConnection(rtc: any): any {
 }
 
 function parseWebRtcRows(stats: any[], conn: any): Partial<TransportStats> {
-    const transport = stats.find(s => s.type === "transport");
-    const candidatePair =
-        stats.find(s => s.type === "candidate-pair" && (s.selected || s.nominated)) ??
-        (transport?.selectedCandidatePairId
-            ? stats.find(s => s.id === transport.selectedCandidatePairId)
-            : undefined);
-    const localCandidate = candidatePair?.localCandidateId
-        ? stats.find(s => s.id === candidatePair.localCandidateId)
-        : undefined;
-    const remoteCandidate = candidatePair?.remoteCandidateId
-        ? stats.find(s => s.id === candidatePair.remoteCandidateId)
-        : undefined;
+        const transport = stats.find(s => s.type === "transport");
+        const candidatePair =
+            stats.find(s => s.type === "candidate-pair" && (s.selected || s.nominated)) ??
+            (transport?.selectedCandidatePairId
+                ? stats.find(s => s.id === transport.selectedCandidatePairId)
+                : undefined);
+        const localCandidate = candidatePair?.localCandidateId
+            ? stats.find(s => s.id === candidatePair.localCandidateId)
+            : undefined;
+        const remoteCandidate = candidatePair?.remoteCandidateId
+            ? stats.find(s => s.id === candidatePair.remoteCandidateId)
+            : undefined;
     const fallbackRemote = stats.find(s => s.type === "remote-candidate" && (s.address || s.ip));
-    const codecMap = new Map(
-        stats
-            .filter(s => s.type === "codec" && typeof s.mimeType === "string")
-            .map(s => [s.id, s])
-    );
-    const inbound = stats.filter(s =>
+        const codecMap = new Map(
+            stats
+                .filter(s => s.type === "codec" && typeof s.mimeType === "string")
+                .map(s => [s.id, s])
+        );
+        const inbound = stats.filter(s =>
         s.type === "inbound-rtp" && String(s.kind ?? s.mediaType ?? "").toLowerCase() === "audio"
-    );
-    const outbound = stats.filter(s =>
+        );
+        const outbound = stats.filter(s =>
         s.type === "outbound-rtp" && String(s.kind ?? s.mediaType ?? "").toLowerCase() === "audio"
     );
     const pairRtt = numOrNull(candidatePair?.currentRoundTripTime);
-    return {
-        transportProtocol: String(
+        return {
+            transportProtocol: String(
             localCandidate?.protocol ?? remoteCandidate?.protocol ?? candidatePair?.protocol ?? "-"
-        ).toUpperCase(),
+            ).toUpperCase(),
         dtlsState: String(transport?.dtlsState ?? conn?.sctp?.transport?.state ?? "-"),
-        dtlsCipher: String(transport?.dtlsCipher ?? "-"),
-        srtpCipher: String(transport?.srtpCipher ?? "-"),
-        selectedCandidateState: String(candidatePair?.state ?? "-"),
-        localCandidateProtocol: String(localCandidate?.protocol ?? "-").toUpperCase(),
-        remoteCandidateProtocol: String(remoteCandidate?.protocol ?? "-").toUpperCase(),
+            dtlsCipher: String(transport?.dtlsCipher ?? "-"),
+            srtpCipher: String(transport?.srtpCipher ?? "-"),
+            selectedCandidateState: String(candidatePair?.state ?? "-"),
+            localCandidateProtocol: String(localCandidate?.protocol ?? "-").toUpperCase(),
+            remoteCandidateProtocol: String(remoteCandidate?.protocol ?? "-").toUpperCase(),
         remoteEndpoint: endpointOf(
             remoteCandidate?.address ?? remoteCandidate?.ip ?? fallbackRemote?.address ?? fallbackRemote?.ip,
             remoteCandidate?.port ?? fallbackRemote?.port
@@ -1414,8 +1423,36 @@ async function collectTransportSecurityStats(
     }
 }
 
+function transportFromStats(s: SelfStats): TransportStats {
+    return {
+        transportProtocol: s.transportProtocol,
+        dtlsState: s.dtlsState,
+        dtlsCipher: s.dtlsCipher,
+        srtpCipher: s.srtpCipher,
+        selectedCandidateState: s.selectedCandidateState,
+        localCandidateProtocol: s.localCandidateProtocol,
+        remoteCandidateProtocol: s.remoteCandidateProtocol,
+        remoteEndpoint: s.remoteEndpoint,
+        remoteCandidateType: s.remoteCandidateType,
+        localEndpoint: s.localEndpoint,
+        localCandidateType: s.localCandidateType,
+        localNetworkType: s.localNetworkType,
+        remoteNetworkType: s.remoteNetworkType,
+        bytesIn: s.bytesIn,
+        bytesOut: s.bytesOut,
+        pairRttMs: s.pairRttMs,
+        availableBitrateKbps: s.availableBitrateKbps,
+        audioCodecs: s.audioCodecs,
+        packetsIn: s.packetsIn,
+        packetsOut: s.packetsOut,
+        packetsLost: s.packetsLost,
+        jitterMs: s.jitterMs,
+        bitrateKbps: s.bitrateKbps
+    };
+}
+
 /** Local user's own voice connection only. */
-async function collectSelfStats(): Promise<SelfStats> {
+async function collectSelfStats(skipTransport = false): Promise<SelfStats> {
     try {
         const channelId =
             SelectedChannelStore.getVoiceChannelId?.() ??
@@ -1499,9 +1536,11 @@ async function collectSelfStats(): Promise<SelfStats> {
         const host = RTCConnectionStore.getHostname?.();
         const hostname = host && String(host).trim() ? String(host) : "-";
 
-        const rtc = RTCConnectionStore.getRTCConnection?.() as any;
-        const voiceConn = pickVoiceConnection(rtc);
-        const transportStats = await collectTransportSecurityStats(voiceConn, connected, hostname);
+        const rtc = skipTransport ? null : RTCConnectionStore.getRTCConnection?.() as any;
+        const voiceConn = skipTransport ? null : pickVoiceConnection(rtc);
+        const transportStats = skipTransport
+            ? transportFromStats(stats)
+            : await collectTransportSecurityStats(voiceConn, connected, hostname);
         const clientNet = readClientNetwork();
 
         const jitterMs =
@@ -1791,14 +1830,33 @@ function onResize() {
     paint();
 }
 
-function paint() {
-    root?.render(
-        <IpaWindow
-            ui={uiState}
-            dragging={dragging}
-            stats={stats}
-        />
-    );
+function overlayPaintSig() {
+    return [
+        uiState.minimized, uiState.maximized, uiState.pos.left, uiState.pos.top,
+        uiState.size.width, uiState.size.height,
+        stats.connected, stats.reconnecting, stats.state, stats.quality,
+        stats.rttMs, stats.packetLossPct, stats.jitterMs, stats.bitrateKbps,
+        stats.hostname, stats.remoteEndpoint, stats.dtlsState, stats.srtpCipher,
+        stats.packetsIn, stats.packetsOut, stats.speaking, stats.muted,
+        stats.channelName, stats.participants.length,
+        stats.participants.map(p => `${p.id}:${p.connected ? 1 : 0}`).join(","),
+        wiresharkSnapshot.running, wiresharkSnapshot.packetsCaptured,
+        wiresharkSnapshot.packetsPerSecond, wiresharkSnapshot.bytesCaptured,
+        wiresharkSnapshot.connections.length, lastCaptureMessage
+    ].join("|");
+}
+
+function paint(force = false) {
+    if (!root) return;
+    if (dragging || overlayResize) {
+        lastPaintSig = "";
+        root.render(<IpaWindow ui={uiState} dragging={dragging} stats={stats} />);
+        return;
+    }
+    const sig = overlayPaintSig();
+    if (!force && sig === lastPaintSig) return;
+    lastPaintSig = sig;
+    root.render(<IpaWindow ui={uiState} dragging={dragging} stats={stats} />);
 }
 
 function Sparkline({ values, color }: { values: number[]; color: string; }) {
@@ -2212,11 +2270,9 @@ function ParticipantCard({
         const body = document.querySelector(".vc-ipa-body");
         body?.addEventListener("scroll", place, { passive: true });
         window.addEventListener("resize", place);
-        window.addEventListener("pointermove", place);
         return () => {
             body?.removeEventListener("scroll", place);
             window.removeEventListener("resize", place);
-            window.removeEventListener("pointermove", place);
         };
     }, [open]);
 
@@ -2515,7 +2571,7 @@ function IpaWindow({
                                 <div>
                                     <span className="vc-ipa-eyebrow">PEOPLE</span>
                                     <h2 className="vc-ipa-heading">{s.channelName}</h2>
-                                </div>
+                            </div>
                                 <span className={"vc-ipa-status-pill" + (s.connected ? " is-ok" : s.reconnecting ? " is-warn" : "")}>
                                     {s.connected ? "LIVE" : s.reconnecting ? "WAIT" : "IDLE"}
                                 </span>
@@ -2544,7 +2600,7 @@ function IpaWindow({
                                 <div>
                                     <span className="vc-ipa-eyebrow">YOUR CALL</span>
                                     <h2 className="vc-ipa-heading">Quality and transport</h2>
-                                </div>
+                            </div>
                                 <span className={"vc-ipa-status-pill" + (s.connected ? " is-ok" : "")}>{s.quality}</span>
                             </div>
                             <div className="vc-ipa-kpis vc-ipa-kpis-compact">
@@ -2695,13 +2751,40 @@ function StatRow({ label, value }: { label: string; value: string; }) {
     );
 }
 
+function overlayPollMs() {
+    if (uiState.minimized) return 3000;
+    if (stats.connected || inVoiceNow()) return 1500;
+    return 4000;
+}
+
+function schedulePoll() {
+    if (pollHandle != null) clearTimeout(pollHandle);
+    pollHandle = setTimeout(() => { void refreshStats(); }, overlayPollMs());
+}
+
+function scheduleWirePoll() {
+    if (wiresharkHandle != null) clearTimeout(wiresharkHandle);
+    if (!inVoiceNow() && !wiresharkSnapshot.running && !captureBusy) return;
+    wiresharkHandle = setTimeout(() => { void fetchWiresharkSnapshot(); }, 2000);
+}
+
 async function refreshStats() {
-    stats = await collectSelfStats();
-    const dest = getObservedDest(stats);
-    for (const key of destLookupKeys(stats, dest))
-        void ensureGeo(key);
-    void syncVoiceCapture();
+    if (refreshBusy) return;
+    refreshBusy = true;
+    try {
+        const skipTransport = uiState.minimized || (!inVoiceNow() && !stats.connected);
+        stats = await collectSelfStats(skipTransport);
+        if (!skipTransport) {
+            const dest = getObservedDest(stats);
+            for (const key of destLookupKeys(stats, dest))
+                void ensureGeo(key);
+        }
+        void syncVoiceCapture();
     paint();
+    } finally {
+        refreshBusy = false;
+        if (mount) schedulePoll();
+    }
 }
 
 async function ensureUi() {
@@ -2730,22 +2813,22 @@ async function ensureUi() {
         resizeBound = true;
     }
 
+    lastPaintSig = "";
     void refreshStats();
     void fetchWiresharkSnapshot();
-
-    pollHandle = setInterval(() => { void refreshStats(); }, 1000);
-    wiresharkHandle = setInterval(() => { void fetchWiresharkSnapshot(); }, 1500);
 }
 
 function teardownUi(clearResize = true) {
     if (pollHandle) {
-        clearInterval(pollHandle);
+        clearTimeout(pollHandle);
         pollHandle = null;
     }
     if (wiresharkHandle) {
-        clearInterval(wiresharkHandle);
+        clearTimeout(wiresharkHandle);
         wiresharkHandle = null;
     }
+    refreshBusy = false;
+    lastPaintSig = "";
     if (clearResize && resizeBound) {
         window.removeEventListener("resize", onResize);
         resizeBound = false;

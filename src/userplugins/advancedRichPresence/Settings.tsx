@@ -5,19 +5,19 @@
  */
 
 import { isPluginEnabled } from "@api/PluginManager";
-import { ExpandableSection } from "@components/ExpandableCard";
 import { resolveError, SettingsSection } from "@components/settings/tabs/plugins/components/Common";
 import { Switch } from "@components/Switch";
 import { debounce } from "@shared/debounce";
 import { classNameFactory } from "@utils/css";
 import { ActivityType } from "@vencord/discord-types/enums";
-import { Button, Select, showToast, Text, TextArea, TextInput, Toasts, useEffect, useLayoutEffect, useState } from "@webpack/common";
+import { Button, Select, showToast, Text, TextArea, TextInput, Toasts, useEffect, useLayoutEffect, useRef, useState } from "@webpack/common";
 import type { ReactNode } from "react";
 
 import AdvancedRichPresence, { setRpc, settings, TimestampMode } from ".";
 import type { PresencePreset } from "./markdown";
-import { LiveProfilePreview } from "./Preview";
+import { LiveProfilePreview, resolvePreviewImage } from "./Preview";
 import {
+    blankStore,
     createNewPreset,
     deletePresetFile,
     getCachedPresets,
@@ -34,11 +34,8 @@ type SettingsKey = keyof typeof settings.store;
 
 const updateRPC = debounce(() => {
     try {
-        setRpc(true);
         if (isPluginEnabled(AdvancedRichPresence.name)) void setRpc();
-        const { activeFile, activeName } = settings.store;
-        if (activeFile)
-            void saveCurrentAsPreset(settings.store, activeName || "Untitled", activeFile);
+        else void setRpc(true);
     } catch (e) {
         console.error("[AdvancedRichPresence] updateRPC failed", e);
     }
@@ -190,14 +187,21 @@ function SelectSetting<T>({ settingsKey, label, options, disabled, hint }: Selec
 }
 
 function Fold({ title, children, open = false }: { title: string; children: ReactNode; open?: boolean; }) {
+    const [expanded, setExpanded] = useState(open);
+
     return (
-        <ExpandableSection
-            className={cl("fold")}
-            initialExpanded={open}
-            renderContent={() => <div className={cl("fold-body")}>{children}</div>}
-        >
-            <span className={cl("fold-title")}>{title}</span>
-        </ExpandableSection>
+        <div className={cl("fold")} data-expanded={expanded || undefined}>
+            <button
+                type="button"
+                className={cl("fold-header")}
+                aria-expanded={expanded}
+                onClick={() => setExpanded(v => !v)}
+            >
+                <span className={cl("fold-title")}>{title}</span>
+                <span className={cl("fold-caret")} aria-hidden>▸</span>
+            </button>
+            {expanded && <div className={cl("fold-body")}>{children}</div>}
+        </div>
     );
 }
 
@@ -224,10 +228,82 @@ function NotesField() {
     );
 }
 
+function PresetThumb({ src, appId, name }: { src?: string; appId?: string; name: string; }) {
+    const [url, setUrl] = useState("");
+    const [fallback, setFallback] = useState("");
+
+    useEffect(() => {
+        let alive = true;
+        const original = String(src ?? "").trim();
+        setUrl("");
+        setFallback("");
+        if (!original) return () => { alive = false; };
+
+        if (/^https?:\/\//i.test(original)) {
+            setUrl(original);
+            void resolvePreviewImage(original, appId, 256, true).then(next => {
+                if (alive && next && next !== original) setFallback(next);
+            });
+            return () => { alive = false; };
+        }
+
+        void resolvePreviewImage(original, appId, 256).then(next => {
+            if (alive) setUrl(next);
+        });
+        return () => { alive = false; };
+    }, [src, appId]);
+
+    if (url) {
+        return (
+            <img
+                className={cl("preset-art")}
+                src={url}
+                alt=""
+                referrerPolicy="no-referrer"
+                onError={() => {
+                    if (fallback && fallback !== url) {
+                        setUrl(fallback);
+                        setFallback("");
+                    } else {
+                        setUrl("");
+                    }
+                }}
+            />
+        );
+    }
+    return (
+        <div className={cl("preset-art", "preset-art-fallback")} aria-hidden>
+            {(name.trim()[0] || "?").toUpperCase()}
+        </div>
+    );
+}
+
+function ProfileToggle() {
+    const s = settings.use(["rpcEnabled"] as never);
+    const enabled = s.rpcEnabled !== false;
+
+    return (
+        <SettingsSection
+            tag="label"
+            name="Show on my profile"
+            id="rpcEnabled"
+            description="Friends see the status that’s turned on."
+            inlineSetting
+        >
+            <Switch
+                checked={enabled}
+                onChange={v => {
+                    settings.store.rpcEnabled = v;
+                    updateRPC();
+                }}
+            />
+        </SettingsSection>
+    );
+}
+
 function PresetManager() {
-    const s = settings.use(["activeFile", "activeName", "rpcEnabled"] as never);
+    const s = settings.use(["activeFile", "rpcEnabled"] as never);
     const [presets, setPresets] = useState<PresencePreset[]>(getCachedPresets());
-    const [newName, setNewName] = useState("");
     const [busy, setBusy] = useState(false);
 
     useEffect(() => subscribePresets(setPresets), []);
@@ -237,9 +313,7 @@ function PresetManager() {
     }, []);
 
     const active = s.activeFile || "";
-    const hasActive = Boolean(s.activeFile);
     const enabled = s.rpcEnabled !== false;
-    const selectKey = `${active}:${presets.map(p => p.fileName).join(",")}`;
 
     async function run(fn: () => Promise<void>) {
         if (busy) return;
@@ -253,124 +327,163 @@ function PresetManager() {
         }
     }
 
+    function turnOn(file: string) {
+        void run(async () => {
+            await loadPresetIntoStore(settings.store, file);
+            settings.store.rpcEnabled = true;
+            updateRPC();
+            toast(`On — ${settings.store.activeName || "preset"}`);
+        });
+    }
+
     return (
-        <div className={cl("ml")}>
-            <SettingsSection
-                tag="label"
-                name="Show on my profile"
-                id="rpcEnabled"
-                description="Whether friends see this custom status under your name."
-                inlineSetting
-            >
-                <Switch
-                    checked={enabled}
-                    onChange={v => {
-                        settings.store.rpcEnabled = v;
+        <div className={cl("section")}>
+            <div className={cl("section-head")}>
+                <p className={cl("section-title")}>Saved statuses</p>
+            </div>
+            {presets.length === 0 ? (
+                <p className={cl("hint")}>Nothing saved yet. Fill this in below, then press Save preset. After that, click a picture here to turn it on.</p>
+            ) : (
+                <div className={cl("presets")}>
+                    {presets.map(preset => {
+                        const on = preset.fileName === active && enabled;
+                        return (
+                            <button
+                                key={preset.fileName}
+                                type="button"
+                                className={cl("preset", on && "preset-on")}
+                                title={on ? `${preset.name} is on` : `Turn on ${preset.name}`}
+                                disabled={busy}
+                                onClick={() => turnOn(preset.fileName)}
+                            >
+                                <span className={cl("preset-media")}>
+                                    <PresetThumb
+                                        src={preset.imageBig}
+                                        appId={preset.appID}
+                                        name={preset.name}
+                                    />
+                                    {on ? (
+                                        <span className={cl("preset-overlay")} aria-hidden>
+                                            <svg className={cl("preset-check")} viewBox="0 0 20 20" width="22" height="22">
+                                                <circle cx="10" cy="10" r="9" fill="#fff" />
+                                                <path
+                                                    d="M6 10.5l2.5 2.5L14 7.5"
+                                                    fill="none"
+                                                    stroke="currentColor"
+                                                    strokeWidth="1.8"
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
+                                                />
+                                            </svg>
+                                        </span>
+                                    ) : null}
+                                </span>
+                                <span className={cl("preset-name")}>{preset.name}</span>
+                            </button>
+                        );
+                    })}
+                </div>
+            )}
+        </div>
+    );
+}
+
+function SaveBar() {
+    const s = settings.use(["activeFile", "activeName", "appName"] as never);
+    const [saveName, setSaveName] = useState(String(s.activeName || s.appName || ""));
+    const [busy, setBusy] = useState(false);
+
+    useEffect(() => {
+        setSaveName(String(s.activeName || s.appName || ""));
+    }, [s.activeFile, s.activeName]);
+
+    async function run(fn: () => Promise<void>) {
+        if (busy) return;
+        setBusy(true);
+        try {
+            await fn();
+        } catch (e) {
+            toast(String(e), Toasts.Type.FAILURE);
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    const hasActive = Boolean(s.activeFile);
+
+    return (
+        <div className={cl("section", "save")}>
+            <div className={cl("section-head")}>
+                <p className={cl("section-title")}>Save this status</p>
+            </div>
+            <p className={cl("hint")}>
+                Fill everything in above, then save. That makes a preset you can turn on later by clicking its picture.
+            </p>
+            <div className={cl("save-row")}>
+                <TextInput
+                    value={saveName}
+                    placeholder="Name, like Harvard Online or Gym"
+                    onChange={setSaveName}
+                />
+                <Button
+                    size={Button.Sizes.MEDIUM}
+                    disabled={busy}
+                    onClick={() => run(async () => {
+                        const title = String(settings.store.appName || "").trim();
+                        if (!title) {
+                            toast("Fill in a title first", Toasts.Type.FAILURE);
+                            return;
+                        }
+                        const name = saveName.trim() || title;
+                        const sameSelected = Boolean(s.activeFile) && (!saveName.trim() || saveName.trim() === (s.activeName || ""));
+                        const preset = sameSelected
+                            ? await saveCurrentAsPreset(settings.store, name, s.activeFile)
+                            : await createNewPreset(settings.store, name);
+                        settings.store.rpcEnabled = true;
+                        updateRPC();
+                        toast(`Saved “${preset.name}”`);
+                    })}
+                >
+                    Save preset
+                </Button>
+            </div>
+            <div className={cl("save-actions")}>
+                <Button
+                    size={Button.Sizes.SMALL}
+                    look={Button.Looks.LINK}
+                    disabled={busy}
+                    onClick={() => {
+                        blankStore(settings.store);
+                        setSaveName("");
                         updateRPC();
                     }}
-                />
-            </SettingsSection>
-
-            <SettingsSection
-                name="Preset"
-                id="preset"
-                description="Select a saved status. Your edits apply to the one that’s selected."
-            >
-                <Select
-                    key={selectKey}
-                    placeholder={presets.length ? "Select a preset" : "No presets yet — create one below"}
-                    options={presets.map(p => ({
-                        label: p.fileName === active ? `${p.name} (selected)` : p.name,
-                        value: p.fileName,
-                    }))}
-                    maxVisibleItems={8}
-                    serialize={String}
-                    isSelected={v => v === active}
-                    select={file => {
-                        if (!file || file === active || busy) return;
-                        void run(async () => {
-                            await loadPresetIntoStore(settings.store, file);
-                            updateRPC();
-                            toast(`Now using “${settings.store.activeName}”`);
-                        });
-                    }}
-                    closeOnSelect
-                    isDisabled={presets.length === 0}
-                />
-            </SettingsSection>
-
-            <SettingsSection
-                name="New preset"
-                id="newPreset"
-                description="Type a name and click Create. Copies whatever you’ve filled in below."
-            >
-                <div className={cl("ml-row")}>
-                    <TextInput
-                        value={newName}
-                        placeholder="Studying, Spotify, Gym…"
-                        onChange={setNewName}
-                    />
-                    <Button
-                        size={Button.Sizes.SMALL}
-                        disabled={busy || !newName.trim()}
-                        onClick={() => run(async () => {
-                            const p = await createNewPreset(settings.store, newName);
-                            toast(`Created “${p.name}”`);
-                            setNewName("");
-                            updateRPC();
-                        })}
-                    >
-                        Create
-                    </Button>
-                </div>
-            </SettingsSection>
-
-            <SettingsSection
-                name="Save or delete"
-                id="presetActions"
-                description="Save updates the selected preset. Delete removes it from this device."
-            >
-                <div className={cl("ml-row")}>
-                    <Button
-                        size={Button.Sizes.SMALL}
-                        disabled={busy || !hasActive}
-                        onClick={() => run(async () => {
-                            if (!s.activeFile) return;
-                            const p = await saveCurrentAsPreset(
-                                settings.store,
-                                s.activeName || "Untitled",
-                                s.activeFile
-                            );
-                            toast(`Saved “${p.name}”`);
-                            updateRPC();
-                        })}
-                    >
-                        Save
-                    </Button>
-                    <Button
-                        size={Button.Sizes.SMALL}
-                        color={Button.Colors.RED}
-                        disabled={busy || !hasActive}
-                        onClick={() => run(async () => {
-                            if (!s.activeFile) return;
-                            const gone = s.activeName || "preset";
-                            await deletePresetFile(settings.store, s.activeFile);
-                            toast(`Deleted “${gone}”`);
-                            updateRPC();
-                        })}
-                    >
-                        Delete
-                    </Button>
-                    <Button
-                        size={Button.Sizes.SMALL}
-                        color={Button.Colors.PRIMARY}
-                        disabled={busy}
-                        onClick={() => run(async () => { await openPresetsFolder(); })}
-                    >
-                        Open folder
-                    </Button>
-                </div>
-            </SettingsSection>
+                >
+                    New blank status
+                </Button>
+                <Button
+                    size={Button.Sizes.SMALL}
+                    color={Button.Colors.RED}
+                    look={Button.Looks.LINK}
+                    disabled={busy || !hasActive}
+                    onClick={() => run(async () => {
+                        if (!s.activeFile) return;
+                        const gone = s.activeName || "preset";
+                        await deletePresetFile(settings.store, s.activeFile);
+                        toast(`Deleted “${gone}”`);
+                        updateRPC();
+                    })}
+                >
+                    Delete selected
+                </Button>
+                <Button
+                    size={Button.Sizes.SMALL}
+                    look={Button.Looks.LINK}
+                    disabled={busy}
+                    onClick={() => run(async () => { await openPresetsFolder(); })}
+                >
+                    Open folder
+                </Button>
+            </div>
         </div>
     );
 }
@@ -380,6 +493,10 @@ function RpcFields() {
 
     return (
         <div className={cl("ml")}>
+            <div className={cl("section-head")}>
+                <p className={cl("section-title")}>Fill this in</p>
+            </div>
+            <p className={cl("hint")}>Set the title, lines, and pictures first. Save when it looks right in the preview.</p>
             <SelectSetting
                 settingsKey="type"
                 label="Status type"
@@ -497,39 +614,76 @@ function RpcFields() {
     );
 }
 
-function useWidePluginModal() {
-    useLayoutEffect(() => {
-        const root = document.querySelector(".vc-arp-root");
-        const dialog = root?.closest('[role="dialog"]') as HTMLElement | null;
-        if (!dialog) return;
+function pinLayout(root: HTMLDivElement) {
+    const restored: Array<() => void> = [];
+    const dialog = root.closest<HTMLElement>("[role='dialog']");
+    dialog?.classList.add("vc-arp-open");
 
-        const marked = new Set<HTMLElement>([dialog]);
-        dialog.classList.add("vc-arp-wide");
+    const scrollers: HTMLElement[] = [];
+    let node: HTMLElement | null = root.parentElement;
+    while (node && node !== dialog) {
+        const overflowY = getComputedStyle(node).overflowY;
+        if (overflowY === "auto" || overflowY === "scroll" || overflowY === "overlay") scrollers.push(node);
+        node = node.parentElement;
+    }
 
-        let el: HTMLElement | null = dialog;
-        for (let i = 0; i < 5 && el; i++) {
-            const maxW = getComputedStyle(el).maxWidth;
-            if (maxW && maxW !== "none" && parseFloat(maxW) > 0 && parseFloat(maxW) < 1080) {
-                el.classList.add("vc-arp-wide");
-                marked.add(el);
-            }
-            el = el.parentElement;
-        }
+    for (const el of scrollers) {
+        const prevOverflow = el.style.overflow;
+        const prevOverflowY = el.style.overflowY;
+        el.style.overflow = "hidden";
+        el.style.overflowY = "hidden";
+        restored.push(() => {
+            el.style.overflow = prevOverflow;
+            el.style.overflowY = prevOverflowY;
+        });
+    }
 
-        return () => {
-            for (const node of marked) node.classList.remove("vc-arp-wide");
-        };
-    }, []);
+    const fit = () => {
+        const top = root.getBoundingClientRect().top;
+        const bottom = dialog?.getBoundingClientRect().bottom ?? window.innerHeight;
+        const height = Math.max(280, Math.floor(Math.min(window.innerHeight, bottom) - top - 16));
+        root.style.height = `${height}px`;
+        root.style.maxHeight = `${height}px`;
+    };
+
+    return { dialog, fit, restored };
 }
 
 export function PresenceSettings() {
-    useWidePluginModal();
+    const rootRef = useRef<HTMLDivElement>(null);
+
+    useLayoutEffect(() => {
+        const root = rootRef.current;
+        if (!root) return;
+
+        const { dialog, fit, restored } = pinLayout(root);
+        fit();
+        const observer = new ResizeObserver(fit);
+        observer.observe(root.parentElement ?? root);
+        if (dialog) observer.observe(dialog);
+        window.addEventListener("resize", fit);
+        const later = window.setTimeout(fit, 80);
+        const afterAnim = window.setTimeout(fit, 320);
+
+        return () => {
+            window.clearTimeout(later);
+            window.clearTimeout(afterAnim);
+            window.removeEventListener("resize", fit);
+            observer.disconnect();
+            dialog?.classList.remove("vc-arp-open");
+            root.style.height = "";
+            root.style.maxHeight = "";
+            restored.forEach(undo => undo());
+        };
+    }, []);
 
     return (
-        <div className={cl("root")}>
+        <div className={cl("root")} ref={rootRef}>
             <div className={cl("pane")}>
+                <ProfileToggle />
                 <PresetManager />
                 <RpcFields />
+                <SaveBar />
             </div>
             <aside className={cl("side")}>
                 <LiveProfilePreview />

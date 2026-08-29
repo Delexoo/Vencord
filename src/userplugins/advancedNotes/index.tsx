@@ -5,6 +5,7 @@
  */
 
 import { Delexo } from "../_delexo/author";
+import { mutationClassMatches, scheduleOnce } from "../_delexo/idle";
 import { definePluginSettings } from "@api/Settings";
 import ErrorBoundary from "@components/ErrorBoundary";
 import { classNameFactory } from "@utils/css";
@@ -97,12 +98,12 @@ export const ProfileNotesButton = ErrorBoundary.wrap(function ProfileNotesButton
 
 function findUserIdNear(el: Element | null): string | null {
     let cur: Element | null = el;
-    for (let i = 0; i < 50 && cur; i++) {
+    for (let i = 0; i < 24 && cur; i++) {
         const fiberKey = Object.keys(cur).find(k =>
             k.startsWith("__reactFiber$") || k.startsWith("__reactInternalInstance$")
         );
         let fiber: any = fiberKey ? (cur as any)[fiberKey] : null;
-        for (let d = 0; d < 40 && fiber; d++, fiber = fiber.return) {
+        for (let d = 0; d < 18 && fiber; d++, fiber = fiber.return) {
             const p = fiber.memoizedProps || fiber.pendingProps || {};
             if (p.user?.id) return String(p.user.id);
             if (p.userId) return String(p.userId);
@@ -114,18 +115,24 @@ function findUserIdNear(el: Element | null): string | null {
 }
 
 function findViewFullProfileButton(): HTMLElement | null {
-    const nodes = document.querySelectorAll<HTMLElement>("button, [role='button'], div[class*='button']");
-    for (const el of nodes) {
-        const t = (el.textContent || "").replace(/\s+/g, " ").trim();
-        if (/^view full profile$/i.test(t)) return el;
+    const roots = document.querySelectorAll<HTMLElement>(
+        '[class*="userPopoutOuter"], [class*="userPopoutInner"], [class*="userProfileOuter"], [class*="biteSize"]'
+    );
+    for (const root of roots) {
+        for (const el of root.querySelectorAll<HTMLElement>("button, [role='button']")) {
+            const t = (el.textContent || "").replace(/\s+/g, " ").trim();
+            if (/^view full profile$/i.test(t)) return el;
+        }
     }
     return null;
 }
 
+const PROFILE_UI_RE = /userProfile|userPopout|profilePanel|biteSize/;
+const placeNotes = scheduleOnce(150);
+
 let popoutHost: HTMLDivElement | null = null;
 let popoutRoot: Root | null = null;
 let popoutObserver: MutationObserver | null = null;
-let popoutQueued = false;
 
 function removePopoutButton() {
     popoutRoot?.unmount();
@@ -144,7 +151,6 @@ function findProfileButtonRow(viewFull: HTMLElement): HTMLElement {
 }
 
 function placePopoutButton() {
-    popoutQueued = false;
     const viewFull = findViewFullProfileButton();
     if (!viewFull) {
         // popout closed
@@ -193,7 +199,8 @@ function findFullProfileNoteSection(): HTMLElement | null {
         document.querySelector<HTMLElement>('[class*="userProfileOuter"]') ||
         document.querySelector<HTMLElement>('[class*="profilePanel"]');
 
-    const scope = profileRoot ?? document.body;
+    if (!profileRoot) return null;
+    const scope = profileRoot;
     let labelEl: HTMLElement | null = null;
     let fieldEl: HTMLElement | null = null;
 
@@ -259,7 +266,6 @@ function hideDefaultNoteUi(section: HTMLElement, keepHost: HTMLElement | null) {
 
 let profileHost: HTMLDivElement | null = null;
 let profileRoot: Root | null = null;
-let profileQueued = false;
 
 function removeProfileNoteButton() {
     profileRoot?.unmount();
@@ -269,7 +275,6 @@ function removeProfileNoteButton() {
 }
 
 function placeFullProfileNote() {
-    profileQueued = false;
     const section = findFullProfileNoteSection();
     if (!section) {
         if (profileHost && !document.body.contains(profileHost)) removeProfileNoteButton();
@@ -311,19 +316,14 @@ function placeFullProfileNote() {
 }
 
 function queueProfileNoteButton() {
-    if (profileQueued) return;
-    profileQueued = true;
-    requestAnimationFrame(() => {
-        try { placeFullProfileNote(); } catch { profileQueued = false; }
+    placeNotes.run(() => {
+        try { placeFullProfileNote(); } catch { /* ignore */ }
+        try { placePopoutButton(); } catch { /* ignore */ }
     });
 }
 
 function queuePopoutButton() {
-    if (popoutQueued) return;
-    popoutQueued = true;
-    requestAnimationFrame(() => {
-        try { placePopoutButton(); } catch { popoutQueued = false; }
-    });
+    queueProfileNoteButton();
 }
 
 export default definePlugin({
@@ -359,14 +359,15 @@ export default definePlugin({
     start() {
         queuePopoutButton();
         queueProfileNoteButton();
-        popoutObserver = new MutationObserver(() => {
-            queuePopoutButton();
-            queueProfileNoteButton();
+        popoutObserver = new MutationObserver(records => {
+            if (popoutHost || profileHost || mutationClassMatches(records, PROFILE_UI_RE))
+                queueProfileNoteButton();
         });
         popoutObserver.observe(document.body, { childList: true, subtree: true });
     },
 
     stop() {
+        placeNotes.cancel();
         popoutObserver?.disconnect();
         popoutObserver = null;
         removePopoutButton();

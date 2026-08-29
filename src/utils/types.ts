@@ -178,6 +178,10 @@ export interface PluginDef {
      */
     settingsAboutComponent?: React.ComponentType<{}>;
     /**
+     * Size of the plugin settings modal. Defaults to lg.
+     */
+    settingsModalSize?: "sm" | "md" | "lg" | "xl" | "xxl";
+    /**
      * Allows you to subscribe to Flux events
      */
     flux?: Partial<{

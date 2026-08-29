@@ -5,12 +5,13 @@
  */
 
 import { definePluginSettings } from "@api/Settings";
+import { getUserSettingLazy } from "@api/UserSettings";
 import { Link } from "@components/Link";
-import { isTruthy } from "@utils/guards";
 import { classes } from "@utils/misc";
 import definePlugin, { OptionType } from "@utils/types";
 import { Activity } from "@vencord/discord-types";
-import { ActivityType } from "@vencord/discord-types/enums";
+import { ActivityFlags, ActivityType } from "@vencord/discord-types/enums";
+import { findByCodeLazy } from "@webpack";
 import { ApplicationAssetUtils, Clickable, FluxDispatcher, Forms, ReactDOM, useLayoutEffect, UserStore, useState } from "@webpack/common";
 
 import { Delexo } from "../_delexo/author";
@@ -20,16 +21,76 @@ import { loadPresetIntoStore, refreshPresets } from "./store";
 import managedStyle from "./style.css?managed";
 
 const SOCKET_ID = "AdvancedRichPresence";
+const ShowCurrentGame = getUserSettingLazy<boolean>("status", "showCurrentGame")!;
+const fetchApplicationsRPC = findByCodeLazy('"Invalid Origin"', ".application");
+const knownApps: Record<string, true> = {};
+let rpcGen = 0;
+let rpcTimer: ReturnType<typeof setInterval> | null = null;
+let rpcDelay: ReturnType<typeof setTimeout> | null = null;
 
 export { TimestampMode };
 
-async function getApplicationAsset(key: string): Promise<string> {
+function isHttp(value?: string) {
+    return Boolean(value && /^https?:\/\//i.test(value.trim()));
+}
+
+function isAppId(value?: string) {
+    return Boolean(value && /^\d{16,21}$/.test(value.trim()));
+}
+
+function isProxiedAsset(key: string) {
+    return Boolean(key) && !/^https?:\/\//i.test(key);
+}
+
+async function ensureApplication(appId: string) {
+    if (!isAppId(appId) || knownApps[appId]) return;
     try {
-        if (!settings.store.appID) return key;
-        return (await ApplicationAssetUtils.fetchAssetIds(settings.store.appID, [key]))[0] ?? key;
+        const socket: Record<string, unknown> = {};
+        await fetchApplicationsRPC(socket, appId);
+        knownApps[appId] = true;
     } catch {
-        return key;
+        knownApps[appId] = true;
     }
+}
+
+async function getApplicationAsset(key: string): Promise<string | undefined> {
+    const raw = String(key ?? "").trim();
+    if (!raw) return undefined;
+    if (isProxiedAsset(raw) && !isHttp(raw)) return raw;
+    const appId = String(settings.store.appID ?? "").trim();
+    if (!isAppId(appId)) return undefined;
+    try {
+        const id = String((await ApplicationAssetUtils.fetchAssetIds(appId, [raw]))[0] ?? "");
+        if (id && isProxiedAsset(id)) return id;
+    } catch { /* Discord rejects raw http assets on the gateway */ }
+    return undefined;
+}
+
+function shareActivity() {
+    try {
+        if (ShowCurrentGame.getSetting() === false)
+            ShowCurrentGame.updateSetting(true);
+    } catch { /* UserSettingsAPI may not be ready yet */ }
+}
+
+function stopRpcLoop() {
+    if (rpcDelay) {
+        clearTimeout(rpcDelay);
+        rpcDelay = null;
+    }
+    if (rpcTimer) {
+        clearInterval(rpcTimer);
+        rpcTimer = null;
+    }
+}
+
+function startRpcLoop() {
+    stopRpcLoop();
+    rpcDelay = setTimeout(() => {
+        rpcDelay = null;
+        void setRpc();
+    }, 2000);
+    rpcTimer = setInterval(() => void setRpc(), 15000);
 }
 
 export const settings = definePluginSettings({
@@ -105,15 +166,20 @@ export async function createActivity(): Promise<Activity | undefined> {
         const userName = me?.globalName || me?.username;
         const details = resolveTemplate(store.details, activeName, userName);
         const state = resolveTemplate(store.state, activeName, userName);
+        const appId = String(appID ?? "").trim();
 
         const activity: Activity = {
-            application_id: appID || "0",
             name: appName,
             state,
             details,
             type: type ?? ActivityType.PLAYING,
-            flags: 1 << 0,
+            flags: ActivityFlags.INSTANCE,
         };
+
+        if (isAppId(appId)) {
+            activity.application_id = appId;
+            await ensureApplication(appId);
+        }
 
         if (type === ActivityType.STREAMING) activity.url = streamLink;
 
@@ -145,31 +211,45 @@ export async function createActivity(): Promise<Activity | undefined> {
             }
         }
 
-        if (detailsURL) activity.details_url = detailsURL;
-        if (stateURL) activity.state_url = stateURL;
+        if (isHttp(detailsURL)) activity.details_url = detailsURL;
+        if (isHttp(stateURL)) activity.state_url = stateURL;
 
-        if (buttonOneText) {
-            activity.buttons = [buttonOneText, buttonTwoText].filter(isTruthy);
-            activity.metadata = {
-                button_urls: [buttonOneURL, buttonTwoURL].filter(isTruthy)
-            };
+        const buttons: string[] = [];
+        const buttonUrls: string[] = [];
+        if (buttonOneText && isHttp(buttonOneURL)) {
+            buttons.push(buttonOneText);
+            buttonUrls.push(String(buttonOneURL).trim());
+        }
+        if (buttonTwoText && isHttp(buttonTwoURL)) {
+            buttons.push(buttonTwoText);
+            buttonUrls.push(String(buttonTwoURL).trim());
+        }
+        if (buttons.length) {
+            activity.buttons = buttons;
+            activity.metadata = { button_urls: buttonUrls };
         }
 
         if (imageBig) {
-            activity.assets = {
-                large_image: await getApplicationAsset(String(imageBig)),
-                large_text: imageBigTooltip || undefined,
-                large_url: imageBigURL || undefined
-            };
+            const large_image = await getApplicationAsset(String(imageBig));
+            if (large_image) {
+                activity.assets = {
+                    large_image,
+                    large_text: imageBigTooltip || undefined,
+                    large_url: isHttp(imageBigURL) ? imageBigURL : undefined
+                };
+            }
         }
 
         if (imageSmall) {
-            activity.assets = {
-                ...activity.assets,
-                small_image: await getApplicationAsset(String(imageSmall)),
-                small_text: imageSmallTooltip || undefined,
-                small_url: imageSmallURL || undefined
-            };
+            const small_image = await getApplicationAsset(String(imageSmall));
+            if (small_image) {
+                activity.assets = {
+                    ...activity.assets,
+                    small_image,
+                    small_text: imageSmallTooltip || undefined,
+                    small_url: isHttp(imageSmallURL) ? imageSmallURL : undefined
+                };
+            }
         }
 
         if (partyId || (partyMaxSize && partySize)) {
@@ -194,14 +274,18 @@ export async function createActivity(): Promise<Activity | undefined> {
 }
 
 export async function setRpc(disable?: boolean) {
+    const gen = ++rpcGen;
     try {
-        const activity = await createActivity();
+        const activity = disable ? null : (await createActivity() ?? null);
+        if (gen !== rpcGen) return;
+        if (activity) shareActivity();
         FluxDispatcher.dispatch({
             type: "LOCAL_ACTIVITY_UPDATE",
-            activity: !disable ? activity ?? null : null,
+            activity,
             socketId: SOCKET_ID,
         });
     } catch (e) {
+        if (gen !== rpcGen) return;
         console.error("[AdvancedRichPresence] setRpc failed", e);
         try {
             FluxDispatcher.dispatch({
@@ -264,10 +348,12 @@ export default definePlugin({
     authors: [Delexo],
     dependencies: ["UserSettingsAPI"],
     requiresRestart: false,
+    settingsModalSize: "xl",
     settings,
     managedStyle,
 
     async start() {
+        settings.store.rpcEnabled = true;
         try {
             const list = await refreshPresets();
             const active = settings.store.activeFile;
@@ -279,11 +365,23 @@ export default definePlugin({
         } catch (e) {
             console.error("[AdvancedRichPresence] preset load failed", e);
         }
-        void setRpc().catch(e => console.error("[AdvancedRichPresence] start failed", e));
+        shareActivity();
+        await setRpc().catch(e => console.error("[AdvancedRichPresence] start failed", e));
+        startRpcLoop();
     },
 
     stop() {
+        stopRpcLoop();
+        rpcGen++;
         void setRpc(true).catch(e => console.error("[AdvancedRichPresence] stop failed", e));
+    },
+
+    flux: {
+        CONNECTION_OPEN() {
+            shareActivity();
+            void setRpc();
+            startRpcLoop();
+        },
     },
 
     patches: [

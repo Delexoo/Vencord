@@ -16,7 +16,6 @@ import {
     getOwnBadgeShare,
     getOwnButtonShare,
     noteOpenProfile,
-    refreshUserProfile,
     startLiveShare,
     stopLiveShare
 } from "../_delexo/liveShare";
@@ -32,10 +31,33 @@ import managedStyle from "./style.css?managed";
 const cl = classNameFactory("vc-profile-button-");
 const REGISTRY_URL = "https://raw.githubusercontent.com/Delexoo/Vencord/main/src/userplugins/profileButton/registry.json";
 
+type ProfileArgs = BadgeUserArgs & {
+    user_id?: string;
+    user?: { id?: string; };
+    bio?: string;
+    _userProfile?: { userId?: string; user_id?: string; bio?: string; };
+};
+
 let registry: Record<string, ButtonShare> = {};
 
 function ownId() {
     return UserStore.getCurrentUser()?.id;
+}
+
+function resolveUserId(args: ProfileArgs | null | undefined) {
+    if (!args) return "";
+    const id = args.userId || args.user_id || args.user?.id || args._userProfile?.userId || args._userProfile?.user_id;
+    return id ? String(id) : "";
+}
+
+function shareBio(userId: string, args?: ProfileArgs | null) {
+    const stored = userId ? UserProfileStore.getUserProfile(userId)?.bio : undefined;
+    const nested = args?._userProfile?.bio;
+    const direct = args?.bio;
+    for (const bio of [stored, nested, direct]) {
+        if (bio && (decodeBadgeShare(bio) || decodeButtonShare(bio))) return bio;
+    }
+    return stored ?? nested ?? direct;
 }
 
 function registryShare(userId: string): ButtonShare | null {
@@ -47,18 +69,20 @@ function registryShare(userId: string): ButtonShare | null {
     return { label, url, heart: item.heart !== false };
 }
 
-function badgeShareFor(userId: string) {
-    if (userId === ownId()) {
-        return getOwnBadgeShare() ?? decodeBadgeShare(UserProfileStore.getUserProfile(userId)?.bio);
+function badgeShareFor(userId: string, args?: ProfileArgs | null) {
+    const bio = shareBio(userId, args);
+    if (userId && userId === ownId()) {
+        return getOwnBadgeShare() ?? decodeBadgeShare(bio);
     }
-    return decodeBadgeShare(UserProfileStore.getUserProfile(userId)?.bio);
+    return decodeBadgeShare(bio);
 }
 
-function buttonShareFor(userId: string): ButtonShare | null {
-    if (userId === ownId()) {
-        return getOwnButtonShare() ?? decodeButtonShare(UserProfileStore.getUserProfile(userId)?.bio) ?? registryShare(userId);
+function buttonShareFor(userId: string, args?: ProfileArgs | null): ButtonShare | null {
+    const bio = shareBio(userId, args);
+    if (userId && userId === ownId()) {
+        return getOwnButtonShare() ?? decodeButtonShare(bio) ?? registryShare(userId);
     }
-    return decodeButtonShare(UserProfileStore.getUserProfile(userId)?.bio) ?? registryShare(userId);
+    return decodeButtonShare(bio) ?? registryShare(userId);
 }
 
 function openButtonUrl(url: string) {
@@ -91,21 +115,23 @@ async function loadRegistry() {
 }
 
 function ProfileButtonBadge(props: ProfileBadge & BadgeUserArgs) {
+    const userId = resolveUserId(props);
     const profile = useStateFromStores(
         [UserProfileStore],
-        () => UserProfileStore.getUserProfile(props.userId)
+        () => userId ? UserProfileStore.getUserProfile(userId) : undefined
     );
 
     useEffect(() => {
-        noteOpenProfile(props.userId);
-        void refreshUserProfile(props.userId, true).catch(() => undefined);
-    }, [props.userId]);
+        if (userId) noteOpenProfile(userId);
+    }, [userId]);
 
-    const data = props.userId === ownId()
-        ? getOwnButtonShare() ?? decodeButtonShare(profile?.bio) ?? registryShare(props.userId)
-        : decodeButtonShare(profile?.bio) ?? registryShare(props.userId);
+    const data = buttonShareFor(userId, {
+        ...props,
+        userId,
+        bio: profile?.bio ?? (props as ProfileArgs).bio
+    });
 
-    if (!data) return null;
+    if (!data) return <span className={cl("slot-empty")} aria-hidden />;
 
     return (
         <Tooltip
@@ -146,23 +172,68 @@ function ProfileButtonBadge(props: ProfileBadge & BadgeUserArgs) {
     );
 }
 
-function getBadges({ userId }: BadgeUserArgs): ProfileBadge[] {
-    const badges = profileBadgesFromShare(badgeShareFor(userId), userId);
-    const button = buttonShareFor(userId);
-    if (!button) return badges;
+function SharedBadges(props: ProfileBadge & BadgeUserArgs) {
+    const userId = resolveUserId(props);
+    const profile = useStateFromStores(
+        [UserProfileStore],
+        () => userId ? UserProfileStore.getUserProfile(userId) : undefined
+    );
+
+    useEffect(() => {
+        if (userId) noteOpenProfile(userId);
+    }, [userId]);
+
+    const badges = profileBadgesFromShare(
+        badgeShareFor(userId, {
+            ...props,
+            userId,
+            bio: profile?.bio ?? (props as ProfileArgs).bio
+        }),
+        userId
+    );
+
+    if (!badges.length) return <span className={cl("slot-empty")} aria-hidden />;
+
+    return (
+        <span className={cl("share")}>
+            {badges.map(badge => (
+                <Tooltip key={badge.id} text={badge.description ?? ""}>
+                    {tip => (
+                        <img
+                            {...tip}
+                            className={cl("share-img")}
+                            src={badge.iconSrc}
+                            alt={badge.description ?? ""}
+                        />
+                    )}
+                </Tooltip>
+            ))}
+        </span>
+    );
+}
+
+function getBadges(args: BadgeUserArgs): ProfileBadge[] {
+    const userId = resolveUserId(args);
+    if (userId) noteOpenProfile(userId);
+    const button = buttonShareFor(userId, args);
     return [{
         id: "delexo_profile_button",
         key: "delexo_profile_button",
         component: ProfileButtonBadge,
         position: BadgePosition.START,
-        link: button.url,
+        link: button?.url,
         onClick(event) {
             event.preventDefault();
             event.stopPropagation();
-            const next = buttonShareFor(userId);
+            const next = buttonShareFor(userId, args);
             if (next) openButtonUrl(next.url);
         }
-    }, ...badges];
+    }, {
+        id: "delexo_share_badges",
+        key: "delexo_share_badges",
+        component: SharedBadges,
+        position: BadgePosition.START
+    }];
 }
 
 const profileBadge: ProfileBadge = {
@@ -189,10 +260,11 @@ export default definePlugin({
 
     flux: {
         USER_PROFILE_MODAL_OPEN({ userId }: { userId?: string; }) {
-            if (userId) {
-                noteOpenProfile(userId);
-                void refreshUserProfile(String(userId), true).catch(() => undefined);
-            }
+            if (userId) noteOpenProfile(userId);
+        },
+        USER_PROFILE_FETCH_SUCCESS({ userProfile }: { userProfile?: { user?: { id?: string; }; user_id?: string; userId?: string; }; }) {
+            const id = String(userProfile?.user?.id ?? userProfile?.user_id ?? userProfile?.userId ?? "");
+            if (id) noteOpenProfile(id);
         }
     },
 

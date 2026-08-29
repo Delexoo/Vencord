@@ -170,7 +170,7 @@ export default function PluginModal({ plugin, onRestartNeeded, onClose, transiti
         <Modal
             transitionState={transitionState}
             onClose={onClose}
-            size="lg"
+            size={plugin.settingsModalSize ?? "lg"}
             title={
                 <div className={cl("header")}>
                     <BaseText tag="h1" weight="semibold" size="lg">{plugin.name}</BaseText>

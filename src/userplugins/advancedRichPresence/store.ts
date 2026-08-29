@@ -163,6 +163,13 @@ export async function saveCurrentAsPreset(store: StoreShape, name: string, overw
     return preset;
 }
 
+export function blankStore(store: StoreShape) {
+    applyFields(store, {});
+    store.notes = "";
+    store.activeFile = undefined;
+    store.activeName = undefined;
+}
+
 export async function loadPresetIntoStore(store: StoreShape, fileName: string) {
     const preset = cache.find(p => p.fileName === fileName)
         || (await refreshPresets()).find(p => p.fileName === fileName);

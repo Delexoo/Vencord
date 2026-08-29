@@ -86,6 +86,13 @@ export default definePlugin({
         scheduleShare();
     },
 
+    flux: {
+        CONNECTION_OPEN() {
+            setOwnButtonShare(currentShare());
+            scheduleShare();
+        }
+    },
+
     stop() {
         setOwnButtonShare(null);
         stopLiveShare();

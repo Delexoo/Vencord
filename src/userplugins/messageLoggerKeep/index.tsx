@@ -93,9 +93,92 @@ function retentionMs(value: KeepFor): number | null {
 }
 
 function iso(value: unknown) {
-    if (!value) return "";
-    const d = value instanceof Date ? value : new Date(value as string | number);
-    return Number.isFinite(d.getTime()) ? d.toISOString() : String(value);
+    if (value == null || value === "") return "";
+    if (value instanceof Date)
+        return Number.isFinite(value.getTime()) ? value.toISOString() : "";
+    if (typeof value === "number") {
+        const d = new Date(value);
+        return Number.isFinite(d.getTime()) ? d.toISOString() : "";
+    }
+    if (typeof value === "string") {
+        const d = new Date(value);
+        return Number.isFinite(d.getTime()) ? d.toISOString() : "";
+    }
+    const obj = value as { toISOString?: () => string; valueOf?: () => unknown; };
+    if (typeof obj.toISOString === "function") {
+        try {
+            const s = obj.toISOString();
+            if (typeof s === "string" && Number.isFinite(Date.parse(s)))
+                return new Date(s).toISOString();
+        } catch { /* ignore */ }
+    }
+    if (typeof obj.valueOf === "function") {
+        const n = Number(obj.valueOf());
+        if (Number.isFinite(n) && n > 0) return new Date(n).toISOString();
+    }
+    return "";
+}
+
+function snowflakeIso(id: string) {
+    try {
+        const ms = Number((BigInt(id) >> 22n) + 1420070400000n);
+        return Number.isFinite(ms) && ms > 0 ? new Date(ms).toISOString() : "";
+    } catch {
+        return "";
+    }
+}
+
+function sentIso(saved: SavedMessage) {
+    return snowflakeIso(saved.messageId) || iso(saved.sentAt) || iso(saved.raw?.timestamp);
+}
+
+function compareIds(a: string, b: string) {
+    try {
+        const delta = BigInt(a) - BigInt(b);
+        return delta < 0n ? -1 : delta > 0n ? 1 : 0;
+    } catch {
+        if (a.length !== b.length) return a.length - b.length;
+        return a < b ? -1 : a > b ? 1 : 0;
+    }
+}
+
+function orderMessages(arr: { id?: string; }[] | undefined) {
+    if (!Array.isArray(arr) || arr.length < 2) return;
+    arr.sort((a, b) => compareIds(String(a?.id ?? "0"), String(b?.id ?? "0")));
+}
+
+function orderCache(cache: any) {
+    if (!cache) return cache;
+    try {
+        orderMessages(cache._array);
+        orderMessages(cache._messages);
+        orderMessages(cache._before?._messages);
+        orderMessages(cache._after?._messages);
+    } catch { /* cache arrays can be frozen on some Discord builds */ }
+    return cache;
+}
+
+function commitOrdered(cache: any) {
+    MessageCache.commit(orderCache(cache));
+    MessageStore.emitChange();
+}
+
+function inLoadedWindow(cache: any, id: string) {
+    const arr = Array.isArray(cache?._array)
+        ? cache._array.filter((m: { id?: string; }) => String(m.id) !== id)
+        : [];
+    if (!arr.length)
+        return Boolean(cache?.ready || cache?.hasFetched || cache?.has?.(id));
+    let oldest = String(arr[0].id ?? "");
+    let newest = oldest;
+    for (const m of arr) {
+        const mid = String(m.id ?? "");
+        if (compareIds(mid, oldest) < 0) oldest = mid;
+        if (compareIds(mid, newest) > 0) newest = mid;
+    }
+    if (compareIds(id, oldest) >= 0 && compareIds(id, newest) <= 0) return true;
+    if (compareIds(id, oldest) < 0) return cache.hasMoreBefore === false;
+    return cache.hasMoreAfter === false;
 }
 
 function pretty(value: string) {
@@ -162,7 +245,7 @@ function rawMessage(msg: any, deleted: boolean): Record<string, unknown> {
         type: msg.type ?? 0,
         flags: msg.flags ?? 0,
         content: msg.content ?? "",
-        timestamp: iso(msg.timestamp) || new Date().toISOString(),
+        timestamp: snowflakeIso(String(msg.id)) || iso(msg.timestamp) || new Date().toISOString(),
         edited_timestamp: msg.edited_timestamp ? iso(msg.edited_timestamp) : null,
         tts: Boolean(msg.tts),
         mention_everyone: Boolean(msg.mention_everyone),
@@ -192,7 +275,7 @@ function snapshot(msg: any, kind: "deleted" | "edited"): SavedMessage | null {
         authorId: author.id,
         authorName: author.globalName || author.username,
         authorUsername: author.username,
-        sentAt: iso(msg.timestamp) || new Date().toISOString(),
+        sentAt: snowflakeIso(String(msg.id)) || iso(msg.timestamp) || new Date().toISOString(),
         deletedAt: new Date().toISOString(),
         guildName: meta.guildName,
         channelName: meta.channelName,
@@ -269,6 +352,25 @@ function saveEdited(channelId: string, id: string) {
     void persist(saved);
 }
 
+function deletedPayload(saved: SavedMessage) {
+    const timestamp = sentIso(saved);
+    return {
+        ...saved.raw,
+        id: saved.messageId,
+        channel_id: saved.channelId,
+        timestamp: timestamp || saved.raw.timestamp,
+        deleted: true,
+        state: "SENT"
+    };
+}
+
+function markDeleted(cache: any, messageId: string) {
+    if (!cache?.has?.(messageId) || typeof cache.update !== "function") return cache;
+    return cache.update(messageId, (old: any) =>
+        old.set ? old.set("deleted", true) : old.merge({ deleted: true })
+    );
+}
+
 function injectSaved(saved: SavedMessage) {
     if (saved.kind !== "deleted") return;
     const channelId = saved.channelId;
@@ -276,59 +378,59 @@ function injectSaved(saved: SavedMessage) {
     try {
         let cache = MessageCache.getOrCreate(channelId);
         if (cache.has(messageId)) {
-            cache = cache.update(messageId, (old: any) =>
-                old.set ? old.set("deleted", true) : old.merge({ deleted: true })
-            );
-            MessageCache.commit(cache);
-            MessageStore.emitChange();
+            commitOrdered(markDeleted(cache, messageId));
             return;
         }
+        if (!inLoadedWindow(cache, messageId)) return;
         if (typeof cache.receiveMessage !== "function") throw new Error("receiveMessage missing");
-        cache = cache.receiveMessage({
-            ...saved.raw,
-            id: messageId,
-            channel_id: channelId,
-            deleted: true,
-            state: "SENT"
-        });
-        if (cache.has(messageId)) {
-            cache = cache.update(messageId, (old: any) =>
-                old.set ? old.set("deleted", true) : old.merge({ deleted: true })
-            );
-        }
-        MessageCache.commit(cache);
-        MessageStore.emitChange();
+        cache = cache.receiveMessage(deletedPayload(saved));
+        commitOrdered(markDeleted(cache, messageId));
     } catch (e) {
         try {
-            MessageActions.receiveMessage(channelId, {
-                ...saved.raw,
-                id: messageId,
-                channel_id: channelId,
-                deleted: true
-            });
+            MessageActions.receiveMessage(channelId, deletedPayload(saved));
             updateMessage(channelId, messageId, { deleted: true });
+            commitOrdered(MessageCache.getOrCreate(channelId));
         } catch (inner) {
             console.error("[MessageLoggerKeep] failed to restore", messageId, e, inner);
         }
     }
 }
 
-async function restoreChannel(channelId: string | null | undefined) {
-    if (!channelId) return;
+const restoring = new Set<string>();
+
+async function restoreChannelReady(channelId: string) {
+    if (restoring.has(channelId)) return;
     const api = native();
     if (!api) return;
+    restoring.add(channelId);
     try {
         const res = await api.loadChannelCache(channelId);
         if (!res?.ok || !res.data) return;
         const items = JSON.parse(String(res.data)) as SavedMessage[];
-        items.sort((a, b) => Date.parse(a.sentAt) - Date.parse(b.sentAt));
+        items.sort((a, b) => compareIds(a.messageId, b.messageId));
         for (const saved of items) {
             if (saved.kind !== "deleted") continue;
             injectSaved(saved);
         }
+        commitOrdered(MessageCache.getOrCreate(channelId));
     } catch (e) {
         console.error("[MessageLoggerKeep] failed to load channel cache", e);
+    } finally {
+        restoring.delete(channelId);
     }
+}
+
+function restoreChannel(channelId: string | null | undefined) {
+    if (!channelId) return;
+    try {
+        if (typeof MessageStore.whenReady === "function") {
+            MessageStore.whenReady(channelId, () => {
+                void restoreChannelReady(channelId);
+            });
+            return;
+        }
+    } catch { /* ignore */ }
+    void restoreChannelReady(channelId);
 }
 
 function expireUi(saved: SavedMessage) {

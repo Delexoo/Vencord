@@ -1,0 +1,44 @@
+name: Windows Installer
+
+on:
+    push:
+        branches:
+            - main
+        paths:
+            - installer/**
+            - .github/workflows/installer.yml
+    workflow_dispatch:
+
+permissions:
+    contents: write
+
+jobs:
+    build:
+        if: github.repository == 'Delexoo/Vencord'
+        runs-on: windows-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: actions/setup-dotnet@v4
+              with:
+                  dotnet-version: "8.0.x"
+
+            - name: Publish installer
+              run: |
+                  dotnet publish installer/UpdateVencordApp.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o installer/publish
+
+            - name: Name release asset
+              run: |
+                  Copy-Item "installer/publish/Vencord Plugins Installer.exe" "installer/publish/Vencord-Plugins-Installer.exe" -Force
+
+            - name: Publish GitHub release
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  $asset = "installer/publish/Vencord-Plugins-Installer.exe"
+                  if (gh release view installer --json tagName 2>$null) {
+                    gh release upload installer $asset --clobber
+                    gh release edit installer --latest
+                  } else {
+                    gh release create installer $asset --title "Vencord + Delexo Plugins installer" --notes "Windows installer. Official Vencord plus Delexo plugins." --latest
+                  }

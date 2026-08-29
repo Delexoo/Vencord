@@ -8,7 +8,8 @@
     border: 0 !important;
 }
 
-:is(a, button, div, span):has(> .vc-profile-button-badge) {
+:is(a, button, div, span):has(> .vc-profile-button-badge),
+:is(a, button, div, span):has(> .vc-profile-button-share) {
     display: inline-flex !important;
     align-items: center !important;
     justify-content: center !important;
@@ -23,6 +24,19 @@
     cursor: pointer !important;
     position: relative;
     z-index: 2;
+}
+
+:is(a, button, div, span):has(> .vc-profile-button-slot-empty) {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    border: 0 !important;
+    pointer-events: none !important;
 }
 
 .vc-profile-button-badge,
@@ -87,4 +101,24 @@
 
 .vc-profile-button-tip .vc-heart-icon path {
     fill: #eb459e;
+}
+
+.vc-profile-button-slot-empty {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+}
+
+.vc-profile-button-share {
+    display: inline-flex;
+    align-items: center;
+    gap: 1px;
+    vertical-align: middle;
+}
+
+.vc-profile-button-share-img {
+    width: 22px;
+    height: 22px;
+    object-fit: contain;
+    vertical-align: middle;
 }
