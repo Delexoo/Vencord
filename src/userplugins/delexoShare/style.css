@@ -8,24 +8,6 @@
     border: 0 !important;
 }
 
-:is(a, button, div, span):has(> .vc-profile-button-badge),
-:is(a, button, div, span):has(> .vc-profile-button-share) {
-    display: inline-flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    width: auto !important;
-    height: auto !important;
-    min-width: 0 !important;
-    min-height: 0 !important;
-    max-width: none !important;
-    max-height: none !important;
-    overflow: visible !important;
-    pointer-events: auto !important;
-    cursor: pointer !important;
-    position: relative;
-    z-index: 2;
-}
-
 :is(a, button, div, span):has(> .vc-profile-button-slot-empty) {
     display: none !important;
     width: 0 !important;
@@ -110,10 +92,15 @@
 }
 
 .vc-profile-button-share {
-    display: inline-flex;
-    align-items: center;
-    gap: 1px;
-    vertical-align: middle;
+    display: contents;
+}
+
+div:has(> .vc-profile-button-badge),
+div:has(> .vc-profile-button-share),
+span:has(> .vc-profile-button-badge),
+span:has(> .vc-profile-button-share) {
+    justify-content: flex-start !important;
+    text-align: left !important;
 }
 
 .vc-profile-button-share-img {

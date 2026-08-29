@@ -781,13 +781,15 @@
 
 .vc-arp-profile-art-btn-small {
     position: absolute;
-    right: -4px;
-    bottom: -4px;
+    right: -2px;
+    bottom: -2px;
     box-sizing: border-box;
     width: 24px;
     height: 24px;
-    overflow: hidden;
-    border-radius: 50%;
+    overflow: visible;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
     background: transparent;
 }
 
@@ -809,15 +811,16 @@
 
 .vc-arp-profile-art-small {
     position: absolute;
-    right: -4px;
-    bottom: -4px;
+    right: -2px;
+    bottom: -2px;
     box-sizing: border-box;
     width: 24px;
     height: 24px;
-    border-radius: 50%;
+    border: 0;
+    border-radius: 0;
     object-fit: contain;
-    border: 3px solid var(--background-base-lower, #1e1f22);
     background: transparent;
+    box-shadow: none;
 }
 
 .vc-arp-profile-copy {
@@ -1069,4 +1072,43 @@
 
 .vc-arp-tips-body > * {
     margin: 0 !important;
+}
+
+/* Live Discord profile activity: drop the grey circular well so PNG alpha shows. */
+[class*="assetsSmallImage"],
+[class*="assetsSmallImage"] img,
+[class*="smallImageContainer"],
+[class*="SmallImageContainer"] {
+    background-color: transparent !important;
+    border: 0 !important;
+    border-color: transparent !important;
+    outline: none !important;
+    box-shadow: none !important;
+    overflow: visible !important;
+}
+
+img[class*="assetsSmallImage"],
+[class*="assetsSmallImage"] img {
+    border-radius: 0 !important;
+    object-fit: contain !important;
+    background-color: transparent !important;
+}
+
+[class*="assetsLargeImage"],
+[class*="assetsLargeImage"] img {
+    -webkit-mask: none !important;
+    mask: none !important;
+    -webkit-mask-image: none !important;
+    mask-image: none !important;
+    clip-path: none !important;
+}
+
+[class*="smallImageMask"],
+[class*="SmallImageMask"],
+[class*="assetsSmallImageMask"] {
+    background-color: transparent !important;
+    box-shadow: none !important;
+    border: 0 !important;
+    -webkit-mask: none !important;
+    mask: none !important;
 }

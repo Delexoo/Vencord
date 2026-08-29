@@ -21,6 +21,74 @@ import {
 
 const Native = VencordNative.pluginHelpers.AdvancedRichPresence as PluginNative<typeof import("./native")> | undefined;
 
+const HARVARD_ONLINE_FILE = "harvard-online.md";
+const ONLYFANS_FILE = "onlyfans.md";
+const CAMERA_FILE = "camera.md";
+/** Real Discord application so presence is broadcast. `name` still overrides the title. */
+export const DEFAULT_RPC_APP_ID = "1260139887504392203";
+
+const BUNDLED_PRESETS: PresencePreset[] = [
+    {
+        id: "arp_harvard_online",
+        name: "Harvard Online",
+        fileName: HARVARD_ONLINE_FILE,
+        updatedAt: 0,
+        appID: DEFAULT_RPC_APP_ID,
+        appName: "Harvard Online",
+        details: "Cybersecurity: Managing Risk in the Information Age",
+        detailsURL: "https://harvardonline.harvard.edu/",
+        type: ActivityType.PLAYING,
+        timestampMode: TimestampMode.TIME,
+        imageBig: "https://static-prod.logosoftwear.com/img/applications/library/design-tips/the-meanings-of-20-university-logos/harvard-logo.jpg",
+        imageBigTooltip: "Playing Harvard Online on Windows 11",
+        imageSmall: "https://media3.giphy.com/media/v1.Y2lkPTZjMDliOTUyNml6b2J2NnVvdWczNGlrZmIzcTZkOWNkczU4eHc5dTVxMmd4aHphciZlcD12MV9zdGlja2Vyc19zZWFyY2gmY3Q9cw/ymOQcf85Q5zrkBrhPM/source.gif",
+        imageSmallTooltip: "Verified",
+        buttonOneText: "Learn More",
+        buttonOneURL: "https://harvardonline.harvard.edu/",
+    },
+    {
+        id: "arp_onlyfans",
+        name: "OnlyFans",
+        fileName: ONLYFANS_FILE,
+        updatedAt: 0,
+        appID: DEFAULT_RPC_APP_ID,
+        appName: "OnlyFans",
+        details: "I know you're curious",
+        type: ActivityType.PLAYING,
+        timestampMode: TimestampMode.TIME,
+        imageBig: "https://www.edigitalagency.com.au/wp-content/uploads/OnlyFans-logo-symbol-icon-png-blue-background-300x300.png",
+        imageBigTooltip: "OnlyFans",
+        buttonOneText: "About me",
+        buttonOneURL: "https://www.youtube.com/watch?v=QDia3e12czc",
+    },
+    {
+        id: "arp_camera",
+        name: "Camera",
+        fileName: CAMERA_FILE,
+        updatedAt: 0,
+        appID: DEFAULT_RPC_APP_ID,
+        appName: "Camera",
+        details: "iOS 26.6.1",
+        type: ActivityType.PLAYING,
+        timestampMode: TimestampMode.TIME,
+        imageBig: "https://static.wikia.nocookie.net/ipod/images/5/58/IOS26CameraIcon.webp/revision/latest/scale-to-width-down/250?cb=20250907020904",
+        imageBigTooltip: "Camera",
+    }
+];
+
+async function ensureBundledPresets() {
+    if (!Native) return;
+    for (const preset of BUNDLED_PRESETS) {
+        const exists = await Native.fileExists(preset.fileName);
+        if (exists.ok && exists.data === "1") continue;
+        const res = await Native.writePresetFile(
+            preset.fileName,
+            serializePresetMarkdown({ ...preset, updatedAt: Date.now() })
+        );
+        if (!res.ok) console.error("[AdvancedRichPresence] failed to add preset", preset.name, res.data);
+    }
+}
+
 export type StoreShape = PresenceFields & {
     rpcEnabled?: boolean;
     activeFile?: string;
@@ -90,6 +158,7 @@ export async function refreshPresets(): Promise<PresencePreset[]> {
         if (gen === refreshGen) setCache([]);
         return cache;
     }
+    await ensureBundledPresets();
     await Native.getPresetsDir();
     const listed = await Native.listPresetFiles();
     if (gen !== refreshGen) return cache;

@@ -14,11 +14,12 @@ import managedStyle from "./style.css?managed";
 const MIN_W = 220;
 const MIN_H = 118;
 const COMPACT_W = 292;
-const COMPACT_H = 176;
+const COMPACT_H = 268;
+const ADVANCED_EXTRA_H = 96;
 
 const FROM_LANGS: [string, string][] = [
-    ["tl", "Tagalog"],
     ["auto", "Auto"],
+    ["tl", "Tagalog"],
     ["en", "English"],
     ["es", "Spanish"],
     ["fr", "French"],
@@ -54,12 +55,22 @@ const settings = definePluginSettings({
     fromLang: {
         type: OptionType.STRING,
         description: "Source language (From)",
-        default: "tl"
+        default: "auto"
     },
     toLang: {
         type: OptionType.STRING,
         description: "Target language (To)",
         default: "en"
+    },
+    audioSource: {
+        type: OptionType.STRING,
+        description: "What to listen to: discord, system, or mic",
+        default: "discord"
+    },
+    advancedOpen: {
+        type: OptionType.BOOLEAN,
+        description: "Keep the Advanced source picker open",
+        default: false
     },
     overlayWidth: {
         type: OptionType.NUMBER,
@@ -94,6 +105,12 @@ let lastPaint = "";
 let lastStatus = "";
 let optimisticListen: boolean | null = null;
 let startInFlight = false;
+let specRaf = 0;
+const specBuf = new Float32Array(Engine.SPECTRUM_BARS);
+
+function spectrumBarsHtml(count: number) {
+    return Array.from({ length: count }, () => "<i></i>").join("");
+}
 
 function optionsHtml(list: [string, string][], selected: string) {
     return list.map(([code, name]) =>
@@ -119,20 +136,49 @@ function dropdownHtml(which: "from" | "to", list: [string, string][], selected: 
         </div>`;
 }
 
+function sourceHint(source: Engine.AudioSource) {
+    switch (source) {
+        case "discord":
+            return "This Discord window. Voice calls on Windows often need System audio.";
+        case "system":
+            return "All PC audio: Discord, games, browsers, and other apps.";
+        case "mic":
+            return "Your microphone only.";
+        default: {
+            const _: never = source;
+            return _;
+        }
+    }
+}
+
 function syncEngineLangs() {
-    Engine.setLanguages(settings.store.fromLang, settings.store.toLang);
+    Engine.setLanguages(settings.store.fromLang || "auto", settings.store.toLang || "en");
+    Engine.setAudioSource(Engine.parseAudioSource(settings.store.audioSource));
+}
+
+function currentSource() {
+    return Engine.parseAudioSource(settings.store.audioSource);
+}
+
+function paintSourceButtons() {
+    if (!root) return;
+    const source = currentSource();
+    root.querySelectorAll(".spyt-src-btn").forEach(btn => {
+        const el = btn as HTMLButtonElement;
+        el.classList.toggle("is-on", el.dataset.src === source);
+    });
+    const hint = root.querySelector("[data-src-hint]") as HTMLElement | null;
+    if (hint) hint.textContent = sourceHint(source);
 }
 
 function mount() {
     if (root) return;
-    if (
-        settings.store.overlayWidth < COMPACT_W - 24
-        || settings.store.overlayWidth > COMPACT_W + 40
-        || settings.store.overlayHeight > COMPACT_H + 30
-    ) {
+    if (settings.store.overlayWidth < MIN_W || settings.store.overlayWidth > 560)
         settings.store.overlayWidth = COMPACT_W;
-        settings.store.overlayHeight = COMPACT_H;
-    }
+    if (settings.store.overlayHeight < COMPACT_H || settings.store.overlayHeight > 560)
+        settings.store.overlayHeight = settings.store.advancedOpen
+            ? COMPACT_H + ADVANCED_EXTRA_H
+            : COMPACT_H;
 
     syncEngineLangs();
 
@@ -140,6 +186,8 @@ function mount() {
     root.id = "spyt-live-root";
     applySize(settings.store.overlayWidth, settings.store.overlayHeight);
     if (settings.store.collapsed) root.classList.add("spyt-live-min");
+    if (settings.store.advancedOpen) root.classList.add("spyt-adv-open");
+    const source = currentSource();
     root.innerHTML = `
         <div class="spyt-live-card">
             <div class="spyt-live-bar">
@@ -159,12 +207,39 @@ function mount() {
                 </div>
             </div>
             <div class="spyt-live-langs">
-                ${dropdownHtml("from", FROM_LANGS, settings.store.fromLang, "From")}
+                ${dropdownHtml("from", FROM_LANGS, settings.store.fromLang || "auto", "From")}
                 <span class="spyt-live-arrow" aria-hidden="true"></span>
-                ${dropdownHtml("to", TO_LANGS, settings.store.toLang, "To")}
+                ${dropdownHtml("to", TO_LANGS, settings.store.toLang || "en", "To")}
+            </div>
+            <div class="spyt-adv">
+                <button class="spyt-adv-toggle" type="button" data-act="adv">
+                    <span>Advanced</span>
+                    <span class="spyt-dd-caret" aria-hidden="true"></span>
+                </button>
+                <div class="spyt-adv-body">
+                    <span class="spyt-adv-kicker">Listen to</span>
+                    <div class="spyt-src">
+                        <button class="spyt-src-btn${source === "discord" ? " is-on" : ""}" type="button" data-src="discord">Discord</button>
+                        <button class="spyt-src-btn${source === "system" ? " is-on" : ""}" type="button" data-src="system">System</button>
+                        <button class="spyt-src-btn${source === "mic" ? " is-on" : ""}" type="button" data-src="mic">Mic</button>
+                    </div>
+                    <p class="spyt-adv-hint" data-src-hint>${sourceHint(source)}</p>
+                </div>
+            </div>
+            <div class="spyt-caption is-empty" data-act="caption">
+                <span class="spyt-caption-kicker">Translation</span>
+                <span class="spyt-caption-en">Press Listen — translations appear here</span>
             </div>
             <div class="spyt-live-body-wrap">
+                <div class="spyt-spectrum" aria-hidden="true">
+                    <div class="spyt-spec-bars">${spectrumBarsHtml(Engine.SPECTRUM_BARS)}</div>
+                    <span class="spyt-spec-label">Press Listen</span>
+                </div>
                 <div class="spyt-live-feed"></div>
+            </div>
+            <div class="spyt-orig-float" hidden>
+                <span class="spyt-orig-kicker">Spoken</span>
+                <span class="spyt-orig-text"></span>
             </div>
             <div class="spyt-live-resize" title="Drag to resize"></div>
         </div>
@@ -173,9 +248,13 @@ function mount() {
     applyPosition(settings.store.overlayX, settings.store.overlayY);
     wireOverlay(root);
     wireDropdowns(root);
+    paintSourceButtons();
     makeDraggable(root.querySelector(".spyt-live-bar") as HTMLElement, root);
     makeResizable(root.querySelector(".spyt-live-resize") as HTMLElement, root);
-    renderFeed(Engine.getSnapshot(), false, false);
+    wireSpokenHover(root);
+    renderCaption(Engine.getSnapshot(), false);
+    renderFeed(Engine.getSnapshot(), false);
+    startSpectrum();
     poll();
     timer = window.setInterval(poll, 180);
 
@@ -186,8 +265,10 @@ function mount() {
 function unmount() {
     if (timer != null) window.clearInterval(timer);
     timer = null;
+    stopSpectrum();
     window.removeEventListener("pointerdown", onDocPointer);
     closeDropdowns();
+    hideOrigTip();
     void Engine.stopListening();
     root?.remove();
     root = null;
@@ -265,7 +346,15 @@ function wireOverlay(el: HTMLElement) {
             return;
         }
         if (t?.closest?.(".spyt-live-resize")) return;
-        const btn = t?.closest?.(".spyt-live-btn") as HTMLButtonElement | null;
+        const srcBtn = t?.closest?.(".spyt-src-btn") as HTMLButtonElement | null;
+        if (srcBtn && el.contains(srcBtn)) {
+            e.stopPropagation();
+            if (e.button !== 0 && e.pointerType === "mouse") return;
+            e.preventDefault();
+            void applyAudioSource(Engine.parseAudioSource(srcBtn.dataset.src || ""));
+            return;
+        }
+        const btn = t?.closest?.(".spyt-live-btn, .spyt-adv-toggle") as HTMLButtonElement | null;
         if (btn && el.contains(btn)) {
             e.stopPropagation();
             if (e.button !== 0 && e.pointerType === "mouse") return;
@@ -274,6 +363,7 @@ function wireOverlay(el: HTMLElement) {
             if (act === "hide") hideToggle();
             else if (act === "clear") clearNow();
             else if (act === "listen") listenToggle();
+            else if (act === "adv") toggleAdvanced();
             return;
         }
         if (t?.closest?.(".spyt-live-bar")) return;
@@ -287,16 +377,48 @@ function wireOverlay(el: HTMLElement) {
                 e.stopPropagation();
                 return;
             }
-            if (t?.closest?.(".spyt-live-bar, .spyt-live-resize, .spyt-live-btn")) return;
+            if (t?.closest?.(".spyt-live-bar, .spyt-live-resize, .spyt-live-btn, .spyt-adv")) return;
             e.stopPropagation();
             if (type === "click" || type === "dblclick") e.preventDefault();
         }, true);
     }
 }
 
+function toggleAdvanced() {
+    if (!root) return;
+    const open = !root.classList.contains("spyt-adv-open");
+    root.classList.toggle("spyt-adv-open", open);
+    settings.store.advancedOpen = open;
+    if (open) {
+        const rect = root.getBoundingClientRect();
+        applySize(rect.width, Math.max(rect.height, COMPACT_H + ADVANCED_EXTRA_H));
+        settings.store.overlayHeight = Math.round(root.getBoundingClientRect().height);
+    }
+}
+
+async function applyAudioSource(source: Engine.AudioSource) {
+    settings.store.audioSource = source;
+    Engine.setAudioSource(source);
+    paintSourceButtons();
+    const wasListening = Boolean(optimisticListen) || Engine.isListening();
+    if (!wasListening) return;
+    setStatus("Switching source…");
+    try {
+        await Engine.stopListening();
+        await Engine.startListening();
+        setListenLook(true, "Stop");
+    } catch (e) {
+        optimisticListen = false;
+        settings.store.autoListen = false;
+        setListenLook(false, "Listen");
+        setStatus(String(e).replace(/^Error:\s*/, "").slice(0, 100));
+    }
+}
+
 function hideToggle() {
     if (!root) return;
     closeDropdowns();
+    hideOrigTip();
     const collapsed = !root.classList.contains("spyt-live-min");
     root.classList.toggle("spyt-live-min", collapsed);
     settings.store.collapsed = collapsed;
@@ -306,8 +428,10 @@ function hideToggle() {
 
 function clearNow() {
     if (!root) return;
+    hideOrigTip();
     Engine.clearHistory();
     lastPaint = "cleared";
+    renderCaption(Engine.getSnapshot(), false);
     const feed = root.querySelector(".spyt-live-feed") as HTMLElement;
     feed.innerHTML = `<div class="spyt-live-empty">Cleared</div>`;
 }
@@ -330,7 +454,6 @@ async function startListen() {
     try {
         await Engine.startListening();
         setListenLook(true, "Stop");
-        setStatus("Listening");
     } catch (e) {
         optimisticListen = false;
         settings.store.autoListen = false;
@@ -365,9 +488,11 @@ function applySize(width: number, height: number) {
 
 function applyPosition(x: number, y: number) {
     if (!root) return;
-    if (x < 0 || y < 0) return;
-    const maxX = Math.max(0, window.innerWidth - (root.offsetWidth || MIN_W));
-    const maxY = Math.max(0, window.innerHeight - (root.offsetHeight || MIN_H));
+    const w = root.offsetWidth || MIN_W;
+    const h = root.offsetHeight || MIN_H;
+    const maxX = Math.max(0, window.innerWidth - w);
+    const maxY = Math.max(0, window.innerHeight - h);
+    if (x < 0 || y < 0 || x > maxX + 48 || y > maxY + 48) return;
     root.style.left = `${Math.min(maxX, Math.max(0, Math.round(x)))}px`;
     root.style.top = `${Math.min(maxY, Math.max(0, Math.round(y)))}px`;
     root.style.right = "auto";
@@ -380,6 +505,97 @@ function setStatus(text: string) {
     (root.querySelector(".spyt-live-status") as HTMLElement).textContent = text;
 }
 
+function stopSpectrum() {
+    if (specRaf) {
+        cancelAnimationFrame(specRaf);
+        specRaf = 0;
+    }
+}
+
+function paintSpectrum() {
+    if (!root) return;
+    Engine.fillSpectrum(specBuf);
+    const live = Engine.isListening() || Boolean(optimisticListen);
+    const bars = root.querySelectorAll(".spyt-spec-bars i");
+    let energy = 0;
+    for (let i = 0; i < bars.length; i++) {
+        const v = specBuf[i] || 0;
+        energy += v;
+        const h = live ? 0.05 + Math.min(1, v) * 0.95 : 0.06;
+        (bars[i] as HTMLElement).style.transform = `scaleY(${h})`;
+    }
+    const meter = root.querySelectorAll(".spyt-live-meter i");
+    const group = Math.max(1, Math.floor(specBuf.length / Math.max(1, meter.length)));
+    for (let i = 0; i < meter.length; i++) {
+        let peak = 0;
+        const start = i * group;
+        const end = i === meter.length - 1 ? specBuf.length : start + group;
+        for (let b = start; b < end; b++) peak = Math.max(peak, specBuf[b] || 0);
+        (meter[i] as HTMLElement).style.transform = `scaleY(${live ? 0.18 + peak * 0.82 : 0.22})`;
+    }
+    const label = root.querySelector(".spyt-spec-label") as HTMLElement | null;
+    if (label) {
+        if (!live) label.textContent = "Press Listen";
+        else if (energy / Math.max(1, bars.length) > 0.08) label.textContent = "Hearing audio";
+        else label.textContent = "Listening…";
+    }
+}
+
+function startSpectrum() {
+    stopSpectrum();
+    const tick = () => {
+        specRaf = requestAnimationFrame(tick);
+        paintSpectrum();
+    };
+    specRaf = requestAnimationFrame(tick);
+}
+
+function hideOrigTip() {
+    const tip = root?.querySelector(".spyt-orig-float") as HTMLElement | null;
+    if (!tip) return;
+    tip.hidden = true;
+    tip.classList.remove("is-on");
+}
+
+function showOrigTip(anchor: HTMLElement, spoken: string) {
+    if (!root) return;
+    const text = spoken.trim();
+    if (!text) {
+        hideOrigTip();
+        return;
+    }
+    const tip = root.querySelector(".spyt-orig-float") as HTMLElement | null;
+    const body = tip?.querySelector(".spyt-orig-text") as HTMLElement | null;
+    if (!tip || !body) return;
+    body.textContent = text;
+    tip.hidden = false;
+    tip.classList.add("is-on");
+
+    const rootRect = root.getBoundingClientRect();
+    const anchorRect = anchor.getBoundingClientRect();
+    const tipRect = tip.getBoundingClientRect();
+    const gap = 6;
+    let top = anchorRect.bottom - rootRect.top + gap;
+    if (top + tipRect.height > rootRect.height - 8)
+        top = Math.max(8, anchorRect.top - rootRect.top - tipRect.height - gap);
+    let left = anchorRect.left - rootRect.left;
+    left = Math.min(Math.max(8, left), Math.max(8, rootRect.width - tipRect.width - 8));
+    tip.style.top = `${Math.round(top)}px`;
+    tip.style.left = `${Math.round(left)}px`;
+}
+
+function wireSpokenHover(el: HTMLElement) {
+    el.addEventListener("pointerover", e => {
+        const hit = (e.target as HTMLElement | null)?.closest?.("[data-spoken]") as HTMLElement | null;
+        if (!hit || !el.contains(hit) || !hit.dataset.spoken) {
+            hideOrigTip();
+            return;
+        }
+        showOrigTip(hit, hit.dataset.spoken);
+    });
+    el.addEventListener("pointerleave", () => hideOrigTip());
+}
+
 function historyRows(data: Engine.EngineSnapshot): Engine.HistoryRow[] {
     const rows = data.history.filter(row => row.original || row.translation);
     if (!rows.length && (data.original || data.translation))
@@ -387,41 +603,53 @@ function historyRows(data: Engine.EngineSnapshot): Engine.HistoryRow[] {
     return rows.slice(-12);
 }
 
-function renderFeed(data: Engine.EngineSnapshot, listening: boolean, hearing: boolean) {
+function renderCaption(data: Engine.EngineSnapshot, listening: boolean) {
+    if (!root) return;
+    const cap = root.querySelector(".spyt-caption") as HTMLElement | null;
+    const en = cap?.querySelector(".spyt-caption-en") as HTMLElement | null;
+    if (!cap || !en) return;
+
+    const spoken = (data.original || "").trim();
+    const translated = (data.translation || data.original || "").trim();
+    if (!translated) {
+        cap.classList.add("is-empty");
+        cap.classList.toggle("spyt-live", false);
+        delete cap.dataset.spoken;
+        en.textContent = listening
+            ? "Listening… speech will show up here"
+            : "Press Listen — translations appear here";
+        return;
+    }
+
+    cap.classList.remove("is-empty");
+    cap.classList.toggle("spyt-live", Boolean(data.partial));
+    cap.dataset.spoken = spoken;
+    en.textContent = translated;
+}
+
+function renderFeed(data: Engine.EngineSnapshot, listening: boolean) {
     if (!root) return;
     const feed = root.querySelector(".spyt-live-feed") as HTMLElement;
     const rows = historyRows(data);
+    const older = rows.slice(0, -1);
 
-    if (!rows.length) {
-        const idle = listening && !hearing;
-        feed.innerHTML = idle
-            ? `<div class="spyt-live-empty spyt-live-idle">
-                <span class="spyt-idle-waves" aria-hidden="true"><i></i><i></i><i></i></span>
-                <span>Listening…</span>
-               </div>`
-            : `<div class="spyt-live-empty">${
-                listening ? "Hearing… words will appear soon" : "Press Listen"
-            }</div>`;
+    if (!older.length) {
+        feed.innerHTML = rows.length
+            ? `<div class="spyt-live-empty">Hover the translation to see what was spoken</div>`
+            : "";
         return;
     }
+
     const nearBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 36;
-    feed.replaceChildren(...rows.map((row, i) => {
+    feed.replaceChildren(...older.map(row => {
         const el = document.createElement("div");
-        el.className = "spyt-line" + (data.partial && i === rows.length - 1 ? " spyt-live" : "");
+        el.className = "spyt-line";
+        const spoken = (row.original || "").trim();
+        if (spoken) el.dataset.spoken = spoken;
         const en = document.createElement("span");
         en.className = "spyt-line-en";
-        en.textContent = row.translation || row.original || "";
+        en.textContent = (row.translation || row.original || "").trim();
         el.appendChild(en);
-        if (settings.store.showOriginal) {
-            const orig = (row.original || "").trim();
-            const shown = (row.translation || "").trim();
-            if (orig && orig.toLowerCase() !== shown.toLowerCase()) {
-                const tip = document.createElement("span");
-                tip.className = "spyt-tip";
-                tip.textContent = orig;
-                el.appendChild(tip);
-            }
-        }
         return el;
     }));
     if (nearBottom) feed.scrollTop = feed.scrollHeight;
@@ -441,19 +669,22 @@ function poll() {
     }
     root.classList.toggle("spyt-hear", listening && hearing);
     root.classList.toggle("spyt-idle", listening && !hearing);
+    root.classList.toggle("spyt-has-text", Boolean((data.translation || data.original || "").trim()));
 
     if (data.status) setStatus(data.status);
 
     const rows = historyRows(data);
     const paint = JSON.stringify({
-        rows, listening, hearing,
+        rows,
+        listening,
         partial: data.partial,
-        detect: data.detect,
-        target: data.target
+        original: data.original,
+        translation: data.translation
     });
     if (paint === lastPaint) return;
     lastPaint = paint;
-    renderFeed(data, listening, hearing);
+    renderCaption(data, listening);
+    renderFeed(data, listening);
 }
 
 function makeDraggable(handle: HTMLElement, box: HTMLElement) {
@@ -477,7 +708,7 @@ function makeDraggable(handle: HTMLElement, box: HTMLElement) {
     handle.addEventListener("pointerdown", e => {
         if (e.button !== 0) return;
         const t = e.target as HTMLElement;
-        if (t.closest(".spyt-live-btn, .spyt-dd, .spyt-live-resize")) return;
+        if (t.closest(".spyt-live-btn, .spyt-dd, .spyt-live-resize, .spyt-adv")) return;
         down = true;
         moved = false;
         pid = e.pointerId;

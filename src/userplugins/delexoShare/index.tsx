@@ -9,7 +9,7 @@ import { Heart } from "@components/Heart";
 import { LinkIcon } from "@components/Icons";
 import { classNameFactory } from "@utils/css";
 import definePlugin from "@utils/types";
-import { Tooltip, UserProfileStore, UserStore, useEffect, useStateFromStores } from "@webpack/common";
+import { SelectedGuildStore, Tooltip, UserProfileStore, UserStore, useEffect, useStateFromStores } from "@webpack/common";
 
 import { Delexo } from "../_delexo/author";
 import {
@@ -50,14 +50,28 @@ function resolveUserId(args: ProfileArgs | null | undefined) {
     return id ? String(id) : "";
 }
 
+function profileOf(userId: string) {
+    if (!userId) return undefined;
+    try {
+        return UserProfileStore.getUserProfile(userId);
+    } catch {
+        return undefined;
+    }
+}
+
 function shareBio(userId: string, args?: ProfileArgs | null) {
-    const stored = userId ? UserProfileStore.getUserProfile(userId)?.bio : undefined;
+    const stored = profileOf(userId)?.bio;
     const nested = args?._userProfile?.bio;
     const direct = args?.bio;
-    for (const bio of [stored, nested, direct]) {
+    let guildBio: string | undefined;
+    try {
+        const guildId = SelectedGuildStore.getGuildId?.();
+        if (guildId) guildBio = UserProfileStore.getGuildMemberProfile?.(userId, guildId)?.bio;
+    } catch { /* ignore */ }
+    for (const bio of [stored, nested, direct, guildBio]) {
         if (bio && (decodeBadgeShare(bio) || decodeButtonShare(bio))) return bio;
     }
-    return stored ?? nested ?? direct;
+    return stored ?? nested ?? direct ?? guildBio;
 }
 
 function registryShare(userId: string): ButtonShare | null {
@@ -118,7 +132,7 @@ function ProfileButtonBadge(props: ProfileBadge & BadgeUserArgs) {
     const userId = resolveUserId(props);
     const profile = useStateFromStores(
         [UserProfileStore],
-        () => userId ? UserProfileStore.getUserProfile(userId) : undefined
+        () => profileOf(userId)
     );
 
     useEffect(() => {
@@ -176,7 +190,7 @@ function SharedBadges(props: ProfileBadge & BadgeUserArgs) {
     const userId = resolveUserId(props);
     const profile = useStateFromStores(
         [UserProfileStore],
-        () => userId ? UserProfileStore.getUserProfile(userId) : undefined
+        () => profileOf(userId)
     );
 
     useEffect(() => {

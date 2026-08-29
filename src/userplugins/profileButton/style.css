@@ -8,17 +8,16 @@
     border: 0 !important;
 }
 
-:is(a, button, div, span):has(> .vc-profile-button-badge) {
-    display: inline-flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    width: auto !important;
-    height: auto !important;
+:is(a, button, div, span):has(> .vc-profile-button-slot-empty) {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
     min-width: 0 !important;
     min-height: 0 !important;
-    max-width: none !important;
-    max-height: none !important;
-    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    border: 0 !important;
 }
 
 .vc-profile-button-badge {

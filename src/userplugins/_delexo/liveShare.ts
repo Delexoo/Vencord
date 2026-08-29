@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { Constants, FluxDispatcher, RestAPI, UserProfileStore, UserStore } from "@webpack/common";
+import { Constants, FluxDispatcher, RestAPI, SelectedGuildStore, UserProfileStore, UserStore } from "@webpack/common";
 
 import type { ShareState } from "../badges/share";
 import type { ButtonShare } from "../profileButton/share";
@@ -160,17 +160,29 @@ export async function refreshUserProfile(userId: string, force = false) {
 
     const pending = (async () => {
         try {
+            if (isDiscordFetching(userId)) return UserProfileStore.getUserProfile(userId);
+            const guildId = SelectedGuildStore.getGuildId?.() || undefined;
             const { body } = await RestAPI.get({
                 url: Constants.Endpoints.USER_PROFILE(userId),
                 query: {
                     with_mutual_guilds: true,
-                    with_mutual_friends_count: true
+                    with_mutual_friends: true,
+                    with_mutual_friends_count: true,
+                    ...(guildId ? { guild_id: guildId } : {})
                 },
                 oldFormErrors: true,
             });
             if (!body?.user) return UserProfileStore.getUserProfile(userId);
+            if (isDiscordFetching(userId)) return UserProfileStore.getUserProfile(userId);
             FluxDispatcher.dispatch({ type: "USER_UPDATE", user: body.user });
             await FluxDispatcher.dispatch({ type: "USER_PROFILE_FETCH_SUCCESS", userProfile: body });
+            if (guildId && body.guild_member) {
+                FluxDispatcher.dispatch({
+                    type: "GUILD_MEMBER_PROFILE_UPDATE",
+                    guildId,
+                    guildMember: body.guild_member
+                });
+            }
             lastFetchAt.set(userId, Date.now());
             bumpProfiles();
             scheduleHideGhostBios();
@@ -284,6 +296,7 @@ export function noteOpenProfile(userId: string | null | undefined) {
     setVisible(next);
 }
 
+/** Writes hidden share tags into About Me so other Vencord clients can decode badges. */
 export async function patchOwnBio(mutate: (bio: string) => string) {
     let release!: () => void;
     const previous = bioWriteChain;
@@ -308,6 +321,7 @@ export async function patchOwnBio(mutate: (bio: string) => string) {
         });
         await refreshUserProfile(userId, true).catch(() => undefined);
         bumpProfiles();
+        scheduleHideGhostBios();
     } finally {
         release();
     }

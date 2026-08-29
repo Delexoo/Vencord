@@ -7,7 +7,6 @@
  * Allowed targets: localhost and private LAN addresses only.
  */
 
-import { CspPolicies } from "@main/csp";
 import { spawn, spawnSync, type ChildProcess } from "child_process";
 import { app, IpcMainInvokeEvent, shell } from "electron";
 import { existsSync, mkdirSync, openSync } from "fs";
@@ -16,15 +15,6 @@ import { request as httpsRequest } from "https";
 import { homedir } from "os";
 import { dirname, join } from "path";
 import { URL } from "url";
-
-const MAP_CSP = ["frame-src", "child-src", "img-src", "script-src", "style-src", "connect-src"];
-CspPolicies["maps.google.com"] = MAP_CSP;
-CspPolicies["www.google.com"] = MAP_CSP;
-CspPolicies["maps.gstatic.com"] = MAP_CSP;
-CspPolicies["*.googleapis.com"] = MAP_CSP;
-CspPolicies["*.gstatic.com"] = MAP_CSP;
-CspPolicies["*.google.com"] = MAP_CSP;
-CspPolicies["*.ggpht.com"] = MAP_CSP;
 
 const geoLookupCache = new Map<string, Record<string, unknown>>();
 

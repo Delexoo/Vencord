@@ -200,7 +200,7 @@ sealed class InstallerForm : Form
 
         _eyebrow = new Label
         {
-            Text = $"INSTALLER v{Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.8.2"}",
+            Text = $"INSTALLER v{Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.8.3"}",
             AutoSize = true,
             Font = new Font("Segoe UI", 7.5f, FontStyle.Bold),
             ForeColor = Accent,
@@ -766,7 +766,8 @@ sealed class InstallerForm : Form
             SetProgress(68);
             SetUi("Dependencies", "Installing packages…", Accent);
         }
-        else if (line.Contains("pnpm build", StringComparison.OrdinalIgnoreCase))
+        else if (line.Contains("pnpm build", StringComparison.OrdinalIgnoreCase) ||
+                 line.Contains("Building Vencord", StringComparison.OrdinalIgnoreCase))
         {
             SetProgress(80);
             SetUi("Building", "Compiling Vencord…", Accent);

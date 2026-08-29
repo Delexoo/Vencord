@@ -287,7 +287,7 @@ function ProfileToggle() {
             tag="label"
             name="Show on my profile"
             id="rpcEnabled"
-            description="Friends see the status that’s turned on."
+            description="Friends see the status that’s turned on. Stay Online or Idle — Invisible hides it."
             inlineSetting
         >
             <Switch
@@ -512,7 +512,7 @@ function RpcFields() {
 
             <PairSetting data={[
                 { settingsKey: "appName", label: "Title", isValid: makeValidator(128, true), placeholder: "My activity", hint: "The bold name people see, like a game or app." },
-                { settingsKey: "appID", label: "App ID (optional)", isValid: isAppIdValid, placeholder: "From Developer Portal", hint: "Only needed if you upload images in the Discord Developer Portal." },
+                { settingsKey: "appID", label: "App ID (optional)", isValid: isAppIdValid, placeholder: "From Developer Portal", hint: "Leave blank unless you uploaded pictures in the Developer Portal. Discord still gets an app ID so friends can see this." },
             ]} />
 
             <PairSetting data={[

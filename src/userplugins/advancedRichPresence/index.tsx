@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Vencord, a Discord client mod
  * Copyright (c) 2026 Delexo contributors
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -17,7 +17,7 @@ import { ApplicationAssetUtils, Clickable, FluxDispatcher, Forms, ReactDOM, useL
 import { Delexo } from "../_delexo/author";
 import { resolveTemplate, TimestampMode } from "./markdown";
 import { PresenceSettings } from "./Settings";
-import { loadPresetIntoStore, refreshPresets } from "./store";
+import { DEFAULT_RPC_APP_ID, loadPresetIntoStore, refreshPresets } from "./store";
 import managedStyle from "./style.css?managed";
 
 const SOCKET_ID = "AdvancedRichPresence";
@@ -42,6 +42,11 @@ function isProxiedAsset(key: string) {
     return Boolean(key) && !/^https?:\/\//i.test(key);
 }
 
+function resolveAppId(): string {
+    const raw = String(settings.store.appID ?? "").trim();
+    return isAppId(raw) ? raw : DEFAULT_RPC_APP_ID;
+}
+
 async function ensureApplication(appId: string) {
     if (!isAppId(appId) || knownApps[appId]) return;
     try {
@@ -53,11 +58,10 @@ async function ensureApplication(appId: string) {
     }
 }
 
-async function getApplicationAsset(key: string): Promise<string | undefined> {
+async function getApplicationAsset(key: string, appId: string): Promise<string | undefined> {
     const raw = String(key ?? "").trim();
     if (!raw) return undefined;
     if (isProxiedAsset(raw) && !isHttp(raw)) return raw;
-    const appId = String(settings.store.appID ?? "").trim();
     if (!isAppId(appId)) return undefined;
     try {
         const id = String((await ApplicationAssetUtils.fetchAssetIds(appId, [raw]))[0] ?? "");
@@ -135,7 +139,6 @@ export async function createActivity(): Promise<Activity | undefined> {
         if (store.rpcEnabled === false) return;
 
         const {
-            appID,
             appName,
             detailsURL,
             stateURL,
@@ -166,9 +169,10 @@ export async function createActivity(): Promise<Activity | undefined> {
         const userName = me?.globalName || me?.username;
         const details = resolveTemplate(store.details, activeName, userName);
         const state = resolveTemplate(store.state, activeName, userName);
-        const appId = String(appID ?? "").trim();
+        const appId = resolveAppId();
 
         const activity: Activity = {
+            application_id: appId,
             name: appName,
             state,
             details,
@@ -176,10 +180,7 @@ export async function createActivity(): Promise<Activity | undefined> {
             flags: ActivityFlags.INSTANCE,
         };
 
-        if (isAppId(appId)) {
-            activity.application_id = appId;
-            await ensureApplication(appId);
-        }
+        await ensureApplication(appId);
 
         if (type === ActivityType.STREAMING) activity.url = streamLink;
 
@@ -230,7 +231,7 @@ export async function createActivity(): Promise<Activity | undefined> {
         }
 
         if (imageBig) {
-            const large_image = await getApplicationAsset(String(imageBig));
+            const large_image = await getApplicationAsset(String(imageBig), appId);
             if (large_image) {
                 activity.assets = {
                     large_image,
@@ -241,7 +242,7 @@ export async function createActivity(): Promise<Activity | undefined> {
         }
 
         if (imageSmall) {
-            const small_image = await getApplicationAsset(String(imageSmall));
+            const small_image = await getApplicationAsset(String(imageSmall), appId);
             if (small_image) {
                 activity.assets = {
                     ...activity.assets,
@@ -321,10 +322,10 @@ function SetupTips() {
     const body = open && (
         <div className="vc-arp-tips-body">
             <Forms.FormText>
-                Optional <Link href="https://discord.com/developers/applications">App ID</Link> from the Developer Portal if you upload images there. Otherwise paste a direct <Link href="https://imgur.com">Imgur</Link> image address.
+                Discord only shows this to other people if an App ID is attached. Leave App ID blank and we attach one automatically. Optional <Link href="https://discord.com/developers/applications">your own App ID</Link> if you upload images in the Developer Portal. Otherwise paste a direct <Link href="https://imgur.com">Imgur</Link> image address.
             </Forms.FormText>
             <Forms.FormText>
-                Statuses are saved as files in Documents → AdvancedRichPresence. You won’t see your own buttons; other people will.
+                Statuses are saved as files in Documents → AdvancedRichPresence. You won’t see your own buttons; other people will. Stay Online or Idle — Invisible hides activity.
             </Forms.FormText>
             <Forms.FormText>
                 In Line 1 or Line 2 you can type {"{user}"} (your name), {"{time}"}, {"{date}"}, or {"{preset}"}.
@@ -344,7 +345,7 @@ export default definePlugin({
     name: "AdvancedRichPresence",
     description: "Show a custom status on your profile. Save different statuses and switch between them.",
     tags: ["Activity", "Customisation"],
-    searchTerms: ["rpc", "rich presence", "preset", "markdown", "customrpc", "delexo", "status"],
+    searchTerms: ["rpc", "rich presence", "preset", "markdown", "customrpc", "delexo", "status", "harvard", "onlyfans", "camera"],
     authors: [Delexo],
     dependencies: ["UserSettingsAPI"],
     requiresRestart: false,
@@ -353,6 +354,13 @@ export default definePlugin({
     managedStyle,
 
     async start() {
+        try {
+            FluxDispatcher.dispatch({
+                type: "LOCAL_ACTIVITY_UPDATE",
+                activity: null,
+                socketId: "HarvardOnline",
+            });
+        } catch { /* leftover from the old Harvard Online plugin */ }
         settings.store.rpcEnabled = true;
         try {
             const list = await refreshPresets();

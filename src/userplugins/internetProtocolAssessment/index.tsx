@@ -11,24 +11,29 @@
 import { Delexo } from "../_delexo/author";
 import * as DataStore from "@api/DataStore";
 import { definePluginSettings } from "@api/Settings";
-import { copyWithToast, openPrivateChannel, openUserProfile } from "@utils/discord";
+import { copyWithToast, fetchUserProfile, openPrivateChannel, openUserProfile } from "@utils/discord";
 import definePlugin, { OptionType, PluginNative } from "@utils/types";
-import { RelationshipType } from "@vencord/discord-types/enums";
-import { findByPropsLazy } from "@webpack";
+import type { ConnectedAccount } from "@vencord/discord-types";
+import { RelationshipType, RTCPlatform } from "@vencord/discord-types/enums";
+import { findByCodeLazy, findByPropsLazy, findStoreLazy } from "@webpack";
 import {
     Button,
+    ChannelRTCStore,
     ChannelStore,
     ContextMenuApi,
     createRoot,
     MediaEngineStore,
     Menu,
+    PresenceStore,
     ReactDOM,
     RelationshipStore,
     RTCConnectionStore,
     SelectedChannelStore,
+    useEffect,
     useLayoutEffect,
     useRef,
     useState,
+    UserProfileStore,
     UserStore,
     VoiceStateStore
 } from "@webpack/common";
@@ -40,6 +45,20 @@ import managedStyle from "./style.css?managed";
 
 const Native = VencordNative.pluginHelpers["Internet Protocol Assessment"] as PluginNative<typeof import("./native")> | undefined;
 const RelationshipActions = findByPropsLazy("addRelationship", "removeRelationship");
+const SessionsStore = findStoreLazy("SessionsStore") as {
+    getSessions(): Record<string, {
+        sessionId?: string;
+        status?: string;
+        clientInfo?: { client?: string; os?: string; };
+    }>;
+};
+const connectionPlatforms = findByPropsLazy("isSupported", "getByUrl") as {
+    get(type: string): {
+        getPlatformUserUrl?(connection: ConnectedAccount): string;
+        icon?: { lightSVG?: string; darkSVG?: string; };
+    } | undefined;
+};
+const legacyConnectionType = findByCodeLazy(".TWITTER_LEGACY:") as (platform: string) => string;
 
 const ROOT_ID = "vc-ipa-root";
 const UI_STORE_KEY = "IpaUiState";
@@ -211,6 +230,9 @@ type ParticipantInfo = {
     firstSeen: string;
     lastJoin: string;
     leftAt: string | null;
+    device: string;
+    clients: string;
+    joinedOn: string;
 };
 
 type GeoInfo = {
@@ -404,6 +426,328 @@ function participantAvatar(userId: string, guildId?: string): string {
     }
 }
 
+const DEVICE_KINDS = ["PC", "Mobile", "Console", "Web", "VR", "Unknown"] as const;
+type DeviceKind = typeof DEVICE_KINDS[number];
+
+const PRESENCE_PLATFORMS = ["embedded", "desktop", "mobile", "vr", "web"] as const;
+type PresencePlatform = typeof PRESENCE_PLATFORMS[number];
+
+const STATUS_RANK: Record<string, number> = {
+    online: 4,
+    dnd: 3,
+    idle: 2,
+    invisible: 0,
+    offline: 0,
+    unknown: 0
+};
+
+function isDeviceKind(value: string): value is DeviceKind {
+    return (DEVICE_KINDS as readonly string[]).includes(value);
+}
+
+function bucketDevice(raw: string | null | undefined): DeviceKind | null {
+    if (!raw) return null;
+    const key = raw.trim().toLowerCase();
+    if (!key) return null;
+    if (key === "pc" || key === "desktop" || key === "windows" || key === "macos" || key === "linux" || key === "osx")
+        return "PC";
+    if (key === "mobile" || key === "android" || key === "ios" || key === "iphone" || key === "ipad" || key === "samsung")
+        return "Mobile";
+    if (key === "console" || key === "embedded" || key === "xbox" || key === "playstation" || key === "ps4" || key === "ps5" || key === "ps5_pro")
+        return "Console";
+    if (key === "web" || key === "browser")
+        return "Web";
+    if (key === "vr" || key === "quest")
+        return "VR";
+    return null;
+}
+
+function presencePlatformLabel(platform: PresencePlatform): DeviceKind {
+    switch (platform) {
+        case "desktop":
+            return "PC";
+        case "mobile":
+            return "Mobile";
+        case "web":
+            return "Web";
+        case "embedded":
+            return "Console";
+        case "vr":
+            return "VR";
+        default: {
+            const exhaustive: never = platform;
+            return exhaustive;
+        }
+    }
+}
+
+function rtcPlatformName(platform: RTCPlatform): DeviceKind {
+    switch (platform) {
+        case RTCPlatform.DESKTOP:
+            return "PC";
+        case RTCPlatform.MOBILE:
+            return "Mobile";
+        case RTCPlatform.XBOX:
+            return "Console";
+        case RTCPlatform.PLAYSTATION:
+            return "Console";
+        default: {
+            const exhaustive: never = platform;
+            return exhaustive;
+        }
+    }
+}
+
+function rtcDetail(platform: RTCPlatform): string | null {
+    switch (platform) {
+        case RTCPlatform.DESKTOP:
+        case RTCPlatform.MOBILE:
+            return null;
+        case RTCPlatform.XBOX:
+            return "Xbox";
+        case RTCPlatform.PLAYSTATION:
+            return "PlayStation";
+        default: {
+            const exhaustive: never = platform;
+            return exhaustive;
+        }
+    }
+}
+
+function parseRtcPlatform(raw: unknown): { device: DeviceKind; detail: string | null; } | null {
+    if (raw == null || raw === "") return null;
+    if (typeof raw === "string") {
+        const key = raw.toLowerCase();
+        if (key === "xbox") return { device: "Console", detail: "Xbox" };
+        if (key === "playstation" || key === "ps4" || key === "ps5" || key === "ps5_pro")
+            return { device: "Console", detail: "PlayStation" };
+        const device = bucketDevice(key);
+        return device ? { device, detail: null } : null;
+    }
+    const n = Number(raw);
+    if (n === RTCPlatform.DESKTOP || n === RTCPlatform.MOBILE || n === RTCPlatform.XBOX || n === RTCPlatform.PLAYSTATION)
+        return { device: rtcPlatformName(n), detail: rtcDetail(n) };
+    return null;
+}
+
+function readClientStatus(userId: string): Record<string, string> {
+    try {
+        return { ...(PresenceStore.getClientStatus?.(userId) ?? {}) };
+    } catch {
+        return {};
+    }
+}
+
+function ownClientStatus(): Record<string, string> {
+    try {
+        const sessions = SessionsStore.getSessions?.();
+        if (!sessions || typeof sessions !== "object") return {};
+        const out: Record<string, string> = {};
+        for (const session of Object.values(sessions)) {
+            const client = String(session?.clientInfo?.client || "").toLowerCase();
+            if (!client || client === "unknown") continue;
+            const status = String(session?.status || "online").toLowerCase();
+            const prev = STATUS_RANK[out[client]] ?? -1;
+            if ((STATUS_RANK[status] ?? 1) >= prev) out[client] = status;
+        }
+        return out;
+    } catch {
+        return {};
+    }
+}
+
+function pickInCallPresence(status: Record<string, string>): PresencePlatform | null {
+    let best: PresencePlatform | null = null;
+    let bestScore = -1;
+    PRESENCE_PLATFORMS.forEach((platform, index) => {
+        const st = status[platform];
+        if (!st) return;
+        const score = (STATUS_RANK[String(st).toLowerCase()] ?? 1) * 10 + (PRESENCE_PLATFORMS.length - index);
+        if (score > bestScore) {
+            bestScore = score;
+            best = platform;
+        }
+    });
+    return best;
+}
+
+function presenceDeviceList(status: Record<string, string>): DeviceKind[] {
+    const seen = new Set<DeviceKind>();
+    const extraKeys = ["xbox", "playstation", "android", "ios"];
+    for (const platform of PRESENCE_PLATFORMS) {
+        if (!status[platform]) continue;
+        seen.add(presencePlatformLabel(platform));
+    }
+    for (const key of extraKeys) {
+        if (!status[key]) continue;
+        const bucket = bucketDevice(key);
+        if (bucket) seen.add(bucket);
+    }
+    return DEVICE_KINDS.filter(kind => kind !== "Unknown" && seen.has(kind));
+}
+
+function activityConsoleDetail(userId: string): string | null {
+    try {
+        const acts = PresenceStore.getActivities?.(userId) ?? [];
+        for (const act of acts) {
+            const platform = String(act?.platform ?? "").toLowerCase();
+            if (platform === "xbox") return "Xbox";
+            if (platform === "playstation") return "PlayStation";
+        }
+    } catch { /* ignore */ }
+    return null;
+}
+
+function sessionDeviceForSelf(voiceState: { sessionId?: string | null; } | undefined): { device: DeviceKind; detail: string | null; } | null {
+    try {
+        const sessions = SessionsStore.getSessions?.();
+        if (!sessions || typeof sessions !== "object") return null;
+        const sid = voiceState?.sessionId;
+        if (!sid) return null;
+        const match = Object.entries(sessions).find(([id, session]) => id === sid || session?.sessionId === sid);
+        if (!match) return null;
+        const info = match[1]?.clientInfo;
+        const fromOs = bucketDevice(info?.os);
+        const fromClient = bucketDevice(info?.client);
+        const device = fromOs === "Console" ? fromOs : fromClient ?? fromOs;
+        if (!device) return null;
+        const os = String(info?.os || "").toLowerCase();
+        const detail = fromOs === "Console"
+            ? (os.includes("play") ? "PlayStation" : "Xbox")
+            : null;
+        return { device, detail };
+    } catch {
+        return null;
+    }
+}
+
+function collectParticipantLists(channelId: string): unknown[] {
+    const lists: unknown[][] = [];
+    try { lists.push(ChannelRTCStore.getParticipants?.(channelId) ?? []); } catch { /* ignore */ }
+    try { lists.push(ChannelRTCStore.getFilteredParticipants?.(channelId) ?? []); } catch { /* ignore */ }
+    try { lists.push(ChannelRTCStore.getSpeakingParticipants?.(channelId) ?? []); } catch { /* ignore */ }
+    try { lists.push(ChannelRTCStore.getVideoParticipants?.(channelId) ?? []); } catch { /* ignore */ }
+    return lists.flat();
+}
+
+function voicePlatformFor(channelId: string | undefined, userId: string, guildId?: string): unknown {
+    if (!channelId) return null;
+    try {
+        const one = ChannelRTCStore.getParticipant?.(channelId, userId) as {
+            id?: string;
+            voicePlatform?: unknown;
+            user?: { id?: string; };
+            voiceState?: { voicePlatform?: unknown; platform?: unknown; };
+        } | null;
+        if (one?.voicePlatform != null) return one.voicePlatform;
+        if (one?.voiceState?.voicePlatform != null) return one.voiceState.voicePlatform;
+        if (one?.voiceState?.platform != null) return one.voiceState.platform;
+    } catch { /* ignore */ }
+    try {
+        for (const item of collectParticipantLists(channelId)) {
+            const p = item as {
+                id?: string;
+                voicePlatform?: unknown;
+                user?: { id?: string; };
+                voiceState?: { voicePlatform?: unknown; platform?: unknown; };
+            };
+            const uid = p?.user?.id || p?.id;
+            if (uid !== userId) continue;
+            if (p.voicePlatform != null) return p.voicePlatform;
+            if (p.voiceState?.voicePlatform != null) return p.voiceState.voicePlatform;
+            if (p.voiceState?.platform != null) return p.voiceState.platform;
+        }
+    } catch { /* ignore */ }
+    try {
+        const selfId = UserStore.getCurrentUser?.()?.id;
+        if (userId === selfId) {
+            const channelPlat = VoiceStateStore.getVoicePlatformForChannel?.(channelId, guildId as string);
+            if (channelPlat != null) return channelPlat;
+        }
+    } catch { /* ignore */ }
+    return null;
+}
+
+function detectDevice(
+    userId: string,
+    channelId: string | undefined,
+    isSelf: boolean,
+    voiceState?: { sessionId?: string | null; voicePlatform?: unknown; platform?: unknown; clientPlatform?: unknown; },
+    guildId?: string
+): { device: DeviceKind; clients: string; } {
+    const status = isSelf
+        ? { ...readClientStatus(userId), ...ownClientStatus() }
+        : readClientStatus(userId);
+    const online = presenceDeviceList(status);
+    const rtc = parseRtcPlatform(voicePlatformFor(channelId, userId, guildId))
+        ?? parseRtcPlatform(voiceState?.voicePlatform)
+        ?? parseRtcPlatform(voiceState?.platform)
+        ?? parseRtcPlatform(voiceState?.clientPlatform);
+    const session = isSelf ? sessionDeviceForSelf(voiceState) : null;
+    const thisClientHere = isSelf && Boolean(channelId) && SelectedChannelStore.getVoiceChannelId?.() === channelId;
+
+    let device: DeviceKind = "Unknown";
+    let detail: string | null = null;
+
+    if (rtc) {
+        device = rtc.device;
+        detail = rtc.detail;
+        if (device === "PC" && status.web && !status.desktop && !status.embedded)
+            device = "Web";
+    } else if (session) {
+        device = session.device;
+        detail = session.detail;
+    } else if (thisClientHere) {
+        device = "PC";
+    } else {
+        const picked = pickInCallPresence(status);
+        if (picked) device = presencePlatformLabel(picked);
+        else if (isSelf) device = "PC";
+        else {
+            try {
+                if (PresenceStore.isMobileOnline?.(userId) && !status.desktop) device = "Mobile";
+            } catch { /* ignore */ }
+        }
+    }
+
+    if (device === "Console" && !detail)
+        detail = activityConsoleDetail(userId);
+
+    if (device === "Unknown" && online[0])
+        device = online[0];
+
+    const extras = [
+        ...detail ? [detail] : [],
+        ...online.filter(kind => kind !== device)
+    ];
+    return {
+        device,
+        clients: extras.length ? extras.join(" · ") : device
+    };
+}
+
+function deviceTagClass(device: string) {
+    const kind: DeviceKind = isDeviceKind(device) ? device : "Unknown";
+    switch (kind) {
+        case "Mobile":
+            return "is-mobile";
+        case "PC":
+            return "is-pc";
+        case "Web":
+            return "is-web";
+        case "Console":
+            return "is-console";
+        case "VR":
+            return "is-vr";
+        case "Unknown":
+            return "is-unknown";
+        default: {
+            const exhaustive: never = kind;
+            return exhaustive;
+        }
+    }
+}
+
 function eventsForUser(userId: string): VoicePresenceEvent[] {
     return voicePresenceEvents.filter(event => event.userId === userId).slice(0, 8);
 }
@@ -461,15 +805,27 @@ function syncSessionRoster(
     }
 
     for (const id of currentIds) {
+        const vs = voiceStates[id] as {
+            sessionId?: string | null;
+            voicePlatform?: unknown;
+            platform?: unknown;
+            clientPlatform?: unknown;
+        } | undefined;
+        const found = detectDevice(id, normalized, id === selfId, vs, guildId);
         const existing = sessionRoster.get(id);
         if (existing) {
             existing.name = participantLabel(id);
             existing.avatar = participantAvatar(id, guildId) || existing.avatar;
             existing.self = id === selfId;
+            existing.device = found.device;
+            existing.clients = found.clients;
             if (!existing.connected) {
                 existing.connected = true;
                 existing.lastJoin = now;
                 existing.leftAt = null;
+                existing.joinedOn = found.device;
+            } else if (existing.joinedOn === "Unknown" && found.device !== "Unknown") {
+                existing.joinedOn = found.device;
             }
             continue;
         }
@@ -481,7 +837,10 @@ function syncSessionRoster(
             connected: true,
             firstSeen: now,
             lastJoin: now,
-            leftAt: null
+            leftAt: null,
+            device: found.device,
+            clients: found.clients,
+            joinedOn: found.device
         });
     }
 
@@ -657,7 +1016,8 @@ function openParticipantMenu(e: { preventDefault(): void; stopPropagation(): voi
 function updateVoicePresenceEvents(
     channelId: string | undefined,
     voiceStates: Record<string, unknown>,
-    selfId: string | undefined
+    selfId: string | undefined,
+    guildId?: string
 ) {
     const normalizedChannel = channelId ?? null;
     const currentIds = new Set(
@@ -687,7 +1047,13 @@ function updateVoicePresenceEvents(
                 time: new Date().toISOString(),
                 type: "joined",
                 userId: id,
-                label: `${participantLabel(id)} joined`,
+                label: `${participantLabel(id)} joined · ${detectDevice(
+                    id,
+                    normalizedChannel ?? undefined,
+                    id === selfId,
+                    voiceStates[id] as { sessionId?: string | null; voicePlatform?: unknown; platform?: unknown; clientPlatform?: unknown; } | undefined,
+                    guildId
+                ).device}`,
                 peerCount: currentIds.size
             });
         }
@@ -1265,41 +1631,41 @@ function pickVoiceConnection(rtc: any): any {
 }
 
 function parseWebRtcRows(stats: any[], conn: any): Partial<TransportStats> {
-        const transport = stats.find(s => s.type === "transport");
-        const candidatePair =
-            stats.find(s => s.type === "candidate-pair" && (s.selected || s.nominated)) ??
-            (transport?.selectedCandidatePairId
-                ? stats.find(s => s.id === transport.selectedCandidatePairId)
-                : undefined);
-        const localCandidate = candidatePair?.localCandidateId
-            ? stats.find(s => s.id === candidatePair.localCandidateId)
-            : undefined;
-        const remoteCandidate = candidatePair?.remoteCandidateId
-            ? stats.find(s => s.id === candidatePair.remoteCandidateId)
-            : undefined;
+    const transport = stats.find(s => s.type === "transport");
+    const candidatePair =
+        stats.find(s => s.type === "candidate-pair" && (s.selected || s.nominated)) ??
+        (transport?.selectedCandidatePairId
+            ? stats.find(s => s.id === transport.selectedCandidatePairId)
+            : undefined);
+    const localCandidate = candidatePair?.localCandidateId
+        ? stats.find(s => s.id === candidatePair.localCandidateId)
+        : undefined;
+    const remoteCandidate = candidatePair?.remoteCandidateId
+        ? stats.find(s => s.id === candidatePair.remoteCandidateId)
+        : undefined;
     const fallbackRemote = stats.find(s => s.type === "remote-candidate" && (s.address || s.ip));
-        const codecMap = new Map(
-            stats
-                .filter(s => s.type === "codec" && typeof s.mimeType === "string")
-                .map(s => [s.id, s])
-        );
-        const inbound = stats.filter(s =>
+    const codecMap = new Map(
+        stats
+            .filter(s => s.type === "codec" && typeof s.mimeType === "string")
+            .map(s => [s.id, s])
+    );
+    const inbound = stats.filter(s =>
         s.type === "inbound-rtp" && String(s.kind ?? s.mediaType ?? "").toLowerCase() === "audio"
-        );
-        const outbound = stats.filter(s =>
+    );
+    const outbound = stats.filter(s =>
         s.type === "outbound-rtp" && String(s.kind ?? s.mediaType ?? "").toLowerCase() === "audio"
     );
     const pairRtt = numOrNull(candidatePair?.currentRoundTripTime);
-        return {
-            transportProtocol: String(
+    return {
+        transportProtocol: String(
             localCandidate?.protocol ?? remoteCandidate?.protocol ?? candidatePair?.protocol ?? "-"
-            ).toUpperCase(),
+        ).toUpperCase(),
         dtlsState: String(transport?.dtlsState ?? conn?.sctp?.transport?.state ?? "-"),
-            dtlsCipher: String(transport?.dtlsCipher ?? "-"),
-            srtpCipher: String(transport?.srtpCipher ?? "-"),
-            selectedCandidateState: String(candidatePair?.state ?? "-"),
-            localCandidateProtocol: String(localCandidate?.protocol ?? "-").toUpperCase(),
-            remoteCandidateProtocol: String(remoteCandidate?.protocol ?? "-").toUpperCase(),
+        dtlsCipher: String(transport?.dtlsCipher ?? "-"),
+        srtpCipher: String(transport?.srtpCipher ?? "-"),
+        selectedCandidateState: String(candidatePair?.state ?? "-"),
+        localCandidateProtocol: String(localCandidate?.protocol ?? "-").toUpperCase(),
+        remoteCandidateProtocol: String(remoteCandidate?.protocol ?? "-").toUpperCase(),
         remoteEndpoint: endpointOf(
             remoteCandidate?.address ?? remoteCandidate?.ip ?? fallbackRemote?.address ?? fallbackRemote?.ip,
             remoteCandidate?.port ?? fallbackRemote?.port
@@ -1489,9 +1855,9 @@ async function collectSelfStats(skipTransport = false): Promise<SelfStats> {
         const peerCount = Math.max(0, Object.keys(voiceStates).length - 1);
 
         const mes = MediaEngineStore as any;
-        updateVoicePresenceEvents(channelId, voiceStates, selfId);
-
         const guildId = channel?.guild_id;
+        updateVoicePresenceEvents(channelId, voiceStates, selfId, guildId);
+
         if (channel?.name) lastSessionChannelName = channel.name;
         else if (channelId) lastSessionChannelName = "Voice channel";
         syncSessionRoster(channelId, voiceStates, selfId, guildId);
@@ -1839,7 +2205,7 @@ function overlayPaintSig() {
         stats.hostname, stats.remoteEndpoint, stats.dtlsState, stats.srtpCipher,
         stats.packetsIn, stats.packetsOut, stats.speaking, stats.muted,
         stats.channelName, stats.participants.length,
-        stats.participants.map(p => `${p.id}:${p.connected ? 1 : 0}`).join(","),
+        stats.participants.map(p => `${p.id}:${p.connected ? 1 : 0}:${p.device}:${p.clients}:${p.joinedOn}`).join(","),
         wiresharkSnapshot.running, wiresharkSnapshot.packetsCaptured,
         wiresharkSnapshot.packetsPerSecond, wiresharkSnapshot.bytesCaptured,
         wiresharkSnapshot.connections.length, lastCaptureMessage
@@ -2108,7 +2474,166 @@ function TipSection({ title, children }: { title: string; children: any; }) {
     );
 }
 
-function DestinationMap({ dest, compact }: { dest: ObservedDest; compact?: boolean; }) {
+function connectionKindLabel(type: ConnectedAccount["type"] | string): string {
+    switch (type) {
+        case "amazon-music":
+            return "Amazon Music";
+        case "battlenet":
+            return "Battle.net";
+        case "bluesky":
+            return "Bluesky";
+        case "bungie":
+            return "Bungie";
+        case "contacts":
+            return "Contacts";
+        case "crunchyroll":
+            return "Crunchyroll";
+        case "domain":
+            return "Website";
+        case "ebay":
+            return "eBay";
+        case "epicgames":
+            return "Epic Games";
+        case "facebook":
+            return "Facebook";
+        case "github":
+            return "GitHub";
+        case "instagram":
+            return "Instagram";
+        case "leagueoflegends":
+            return "League of Legends";
+        case "mastodon":
+            return "Mastodon";
+        case "paypal":
+            return "PayPal";
+        case "playstation":
+        case "playstation-stg":
+            return "PlayStation";
+        case "reddit":
+            return "Reddit";
+        case "riotgames":
+            return "Riot Games";
+        case "roblox":
+            return "Roblox";
+        case "samsung":
+            return "Samsung";
+        case "skype":
+            return "Skype";
+        case "soundcloud":
+            return "SoundCloud";
+        case "spotify":
+            return "Spotify";
+        case "steam":
+            return "Steam";
+        case "tiktok":
+            return "TikTok";
+        case "twitch":
+            return "Twitch";
+        case "twitter":
+        case "twitter_legacy":
+            return "X";
+        case "xbox":
+            return "Xbox";
+        case "youtube":
+            return "YouTube";
+        default:
+            return String(type).replace(/[-_]+/g, " ").replace(/\b[a-z]/g, c => c.toUpperCase());
+    }
+}
+
+function connectionPlatform(connection: ConnectedAccount) {
+    try {
+        const key = legacyConnectionType(connection.type) || connection.type;
+        return connectionPlatforms.get(key);
+    } catch {
+        return undefined;
+    }
+}
+
+function connectionUrl(connection: ConnectedAccount): string | undefined {
+    try {
+        const url = connectionPlatform(connection)?.getPlatformUserUrl?.(connection);
+        if (url && /^https?:\/\//i.test(url)) return url;
+    } catch { /* ignore */ }
+    if (connection.type === "domain" && connection.name) {
+        const host = String(connection.name).replace(/^https?:\/\//i, "");
+        if (host) return `https://${host}`;
+    }
+    return undefined;
+}
+
+function ConnectionIcon({ connection }: { connection: ConnectedAccount; }) {
+    try {
+        const src = connectionPlatform(connection)?.icon?.darkSVG;
+        if (src)
+            return <img className="vc-ipa-conn-icon" src={src} alt="" />;
+    } catch { /* ignore */ }
+    return <span className="vc-ipa-conn-fallback">{connectionKindLabel(connection.type).slice(0, 1)}</span>;
+}
+
+function ConnectionsBlock({ userId, active }: { userId: string; active: boolean; }) {
+    const [accounts, setAccounts] = useState<ConnectedAccount[] | null>(null);
+
+    useEffect(() => {
+        if (!active) return;
+        let alive = true;
+        const cached = UserProfileStore.getUserProfile?.(userId)?.connectedAccounts;
+        if (cached) {
+            setAccounts(cached);
+            return;
+        }
+        setAccounts(null);
+        void fetchUserProfile(userId).then(profile => {
+            if (!alive) return;
+            setAccounts(profile?.connectedAccounts ?? []);
+        }).catch(() => {
+            if (alive) setAccounts([]);
+        });
+        return () => { alive = false; };
+    }, [active, userId]);
+
+    if (!active) return null;
+
+    return (
+        <div className="vc-ipa-connections">
+            <em>Connections</em>
+            {accounts == null
+                ? <div className="vc-ipa-conn-empty">Loading…</div>
+                : accounts.length === 0
+                    ? <div className="vc-ipa-conn-empty">None visible</div>
+                    : (
+                        <div className="vc-ipa-conn-list">
+                            {accounts.map(connection => {
+                                const url = connectionUrl(connection);
+                                const kind = connectionKindLabel(connection.type);
+                                return (
+                                    <button
+                                        key={`${connection.type}-${connection.id}`}
+                                        type="button"
+                                        className="vc-ipa-conn"
+                                        title={url || connection.name}
+                                        onClick={e => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            if (url) window.open(url, "_blank", "noopener,noreferrer");
+                                            else copyWithToast(connection.name);
+                                        }}
+                                    >
+                                        <ConnectionIcon connection={connection} />
+                                        <span>
+                                            <strong>{kind}</strong>
+                                            <em>{connection.name}{connection.verified ? " · verified" : ""}</em>
+                                        </span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    )}
+        </div>
+    );
+}
+
+function DestinationMap({ dest }: { dest: ObservedDest; }) {
     const q = dest.geo?.latitude != null && dest.geo?.longitude != null
         ? `${dest.geo.latitude},${dest.geo.longitude}`
         : dest.location && dest.location !== "Unknown" && dest.location !== "Private/LAN"
@@ -2116,32 +2641,25 @@ function DestinationMap({ dest, compact }: { dest: ObservedDest; compact?: boole
             : dest.hostname !== "-"
                 ? dest.hostname
                 : "";
-    if (!q) {
-        return <div className="vc-ipa-map vc-ipa-map-empty">Waiting for destination coordinates.</div>;
-    }
-    const embed = `https://maps.google.com/maps?q=${encodeURIComponent(q)}&z=6&output=embed`;
     const openQuery = dest.geo?.latitude != null && dest.geo?.longitude != null
         ? `${dest.geo.latitude},${dest.geo.longitude}`
         : q;
+    const canOpen = Boolean(q);
     return (
-        <div className={"vc-ipa-map" + (compact ? " is-compact" : "")}>
-            <iframe
-                className="vc-ipa-map-frame"
-                src={embed}
-                title="Destination map"
-                loading="lazy"
-                referrerPolicy="no-referrer-when-downgrade"
-            />
+        <div className="vc-ipa-map">
             <button
                 type="button"
                 className="vc-ipa-map-open"
+                disabled={!canOpen}
+                title={canOpen ? "Open this destination in Google Maps" : "Waiting for destination coordinates"}
                 onClick={e => {
                     e.preventDefault();
                     e.stopPropagation();
+                    if (!canOpen) return;
                     void native()?.openMap(openQuery);
                 }}
             >
-                Open Google Maps
+                {canOpen ? "Open Google Maps" : "Waiting for destination coordinates"}
             </button>
         </div>
     );
@@ -2320,9 +2838,14 @@ function ParticipantCard({
                     </button>
                 </div>
 
+                <ConnectionsBlock userId={participant.id} active={open} />
+
                 <TipSection title="Identity">
                     <TipRow label="Name" value={participant.name} />
                     <TipRow label="User ID" value={participant.id} code />
+                    <TipRow label="Device" value={participant.device} />
+                    <TipRow label="Joined on" value={participant.joinedOn} />
+                    <TipRow label="Clients online" value={participant.clients} />
                     <TipRow label="Status" value={participant.connected ? "Connected to voice" : "Disconnected"} />
                     <TipRow label="Channel" value={s.channelName} />
                     <TipRow label="Peers" value={String(liveCount)} />
@@ -2392,7 +2915,7 @@ function ParticipantCard({
                     <TipRow label="Voice server" value={present(s.hostname)} />
                 </TipSection>
 
-                <DestinationMap dest={dest} compact />
+                <DestinationMap dest={dest} />
 
                 {events.length > 0 && (
                     <div className="vc-ipa-tooltip-events">
@@ -2435,7 +2958,7 @@ function ParticipantCard({
             <UserAvatar src={participant.avatar} name={participant.name} />
             <div className="vc-ipa-user-copy">
                 <strong>{participant.name}</strong>
-                <span>{statusLabel}</span>
+                <span>{statusLabel} · {participant.device}</span>
             </div>
             {tooltip}
         </div>
@@ -2460,6 +2983,11 @@ function IpaWindow({
     const dest = getObservedDest(s);
     const liveCount = s.participants.filter(p => p.connected).length;
     const leftCount = s.participants.filter(p => !p.connected).length;
+    const livePeople = s.participants.filter(p => p.connected);
+    const pcCount = livePeople.filter(p => p.device === "PC").length;
+    const mobileCount = livePeople.filter(p => p.device === "Mobile").length;
+    const consoleCount = livePeople.filter(p => p.device === "Console").length;
+    const otherDeviceCount = Math.max(0, liveCount - pcCount - mobileCount - consoleCount);
     const [chromeReady, setChromeReady] = useState(false);
     useLayoutEffect(() => {
         const frame = requestAnimationFrame(() => setChromeReady(true));
@@ -2566,166 +3094,206 @@ function IpaWindow({
                 </header>
 
                 <div className={"vc-ipa-body vc-ipa-tech-body" + (min ? " is-collapsed" : "")} aria-hidden={min}>
-                        <section className="vc-ipa-panel vc-ipa-people">
-                            <div className="vc-ipa-section-head">
-                                <div>
-                                    <span className="vc-ipa-eyebrow">PEOPLE</span>
-                                    <h2 className="vc-ipa-heading">{s.channelName}</h2>
+                    <section className="vc-ipa-panel vc-ipa-people">
+                        <div className="vc-ipa-section-head">
+                            <div>
+                                <span className="vc-ipa-eyebrow">PEOPLE</span>
+                                <h2 className="vc-ipa-heading">{s.channelName}</h2>
                             </div>
-                                <span className={"vc-ipa-status-pill" + (s.connected ? " is-ok" : s.reconnecting ? " is-warn" : "")}>
-                                    {s.connected ? "LIVE" : s.reconnecting ? "WAIT" : "IDLE"}
-                                </span>
-                            </div>
-                            <div className="vc-ipa-kpis vc-ipa-kpis-compact vc-ipa-kpis-4">
-                                <div className="vc-ipa-kpi"><span>In voice</span><strong>{liveCount}</strong></div>
-                                <div className="vc-ipa-kpi"><span>Seen</span><strong>{s.participants.length}</strong></div>
-                                <div className="vc-ipa-kpi"><span>Left</span><strong>{leftCount}</strong></div>
-                                <div className="vc-ipa-kpi"><span>You</span><strong>{s.muted ? "Muted" : s.speaking ? "Talking" : "Idle"}</strong></div>
-                            </div>
-                            <div className="vc-ipa-user-grid">
-                                {s.participants.length
-                                    ? s.participants.map(participant => (
-                                        <ParticipantCard
-                                            key={participant.id}
-                                            participant={participant}
-                                            stats={s}
-                                        />
-                                    ))
-                                    : <div className="vc-ipa-empty">Join voice to see people here.</div>}
-                            </div>
-                        </section>
+                            <span className={"vc-ipa-status-pill" + (s.connected ? " is-ok" : s.reconnecting ? " is-warn" : "")}>
+                                {s.connected ? "LIVE" : s.reconnecting ? "WAIT" : "IDLE"}
+                            </span>
+                        </div>
+                        <div className="vc-ipa-kpis vc-ipa-kpis-compact vc-ipa-kpis-4">
+                            <div className="vc-ipa-kpi"><span>In voice</span><strong>{liveCount}</strong></div>
+                            <div className="vc-ipa-kpi"><span>Seen</span><strong>{s.participants.length}</strong></div>
+                            <div className="vc-ipa-kpi"><span>Left</span><strong>{leftCount}</strong></div>
+                            <div className="vc-ipa-kpi"><span>You</span><strong>{s.muted ? "Muted" : s.speaking ? "Talking" : "Idle"}</strong></div>
+                        </div>
+                        <div className="vc-ipa-user-grid">
+                            {s.participants.length
+                                ? s.participants.map(participant => (
+                                    <ParticipantCard
+                                        key={participant.id}
+                                        participant={participant}
+                                        stats={s}
+                                    />
+                                ))
+                                : <div className="vc-ipa-empty">Join voice to see people here.</div>}
+                        </div>
+                    </section>
 
-                        <section className="vc-ipa-panel">
-                            <div className="vc-ipa-section-head">
-                                <div>
-                                    <span className="vc-ipa-eyebrow">YOUR CALL</span>
-                                    <h2 className="vc-ipa-heading">Quality and transport</h2>
+                    <section className="vc-ipa-panel">
+                        <div className="vc-ipa-section-head">
+                            <div>
+                                <span className="vc-ipa-eyebrow">DEVICES</span>
+                                <h2 className="vc-ipa-heading">Client when they joined</h2>
                             </div>
-                                <span className={"vc-ipa-status-pill" + (s.connected ? " is-ok" : "")}>{s.quality}</span>
-                            </div>
-                            <div className="vc-ipa-kpis vc-ipa-kpis-compact">
-                                <div className="vc-ipa-kpi"><span>RTT</span><strong>{fmt(s.rttMs, "ms")}</strong></div>
-                                <div className="vc-ipa-kpi"><span>Jitter</span><strong>{fmt(s.jitterMs, "ms", 1)}</strong></div>
-                                <div className="vc-ipa-kpi"><span>Loss</span><strong>{fmt(s.packetLossPct, "%", 1)}</strong></div>
-                                <div className="vc-ipa-kpi"><span>Bitrate</span><strong>{fmt(s.bitrateKbps, "k")}</strong></div>
-                                <div className="vc-ipa-kpi"><span>Lost pkts</span><strong>{s.packetsLost ?? "-"}</strong></div>
-                            </div>
-                            <div className="vc-ipa-grid vc-ipa-grid-tight">
-                                <StatRow label="RTC" value={s.state} />
-                                <StatRow label="DTLS" value={s.dtlsState} />
-                                <StatRow label="SRTP" value={s.srtpCipher} />
-                                <StatRow label="Codecs" value={s.audioCodecs.length ? s.audioCodecs.join(", ") : "-"} />
-                                <StatRow label="Server" value={s.hostname} />
-                                <StatRow label="Remote" value={dest.endpoint} />
-                                <StatRow label="Location" value={dest.location} />
-                                <StatRow label="Network" value={dest.isp} />
-                                <StatRow label="ICE path" value={dest.candidateType} />
-                                <StatRow label="Transport" value={dest.transport} />
-                            </div>
-                            <DestinationMap dest={dest} compact />
-                        </section>
-
-                        <section className="vc-ipa-panel">
-                            <div className="vc-ipa-section-head">
-                                <div>
-                                    <span className="vc-ipa-eyebrow">CAPTURE</span>
-                                    <h2 className="vc-ipa-heading">TShark flows</h2>
-                                </div>
-                                <span className={"vc-ipa-status-pill" + (wiresharkSnapshot.running ? " is-ok" : "")}>
-                                    {wiresharkSnapshot.running ? "ACTIVE" : "OFF"}
-                                </span>
-                            </div>
-                            <div className="vc-ipa-kpis vc-ipa-kpis-compact">
-                                <div className="vc-ipa-kpi"><span>Frames</span><strong>{wiresharkSnapshot.packetsCaptured}</strong></div>
-                                <div className="vc-ipa-kpi"><span>pps</span><strong>{Number(wiresharkSnapshot.packetsPerSecond ?? 0).toFixed(0)}</strong></div>
-                                <div className="vc-ipa-kpi"><span>Flows</span><strong>{wiresharkSnapshot.connections.length}</strong></div>
-                                <div className="vc-ipa-kpi"><span>Wire</span><strong>{fmtRate(wiresharkSnapshot.bitsPerSecond)}</strong></div>
-                                <div className="vc-ipa-kpi"><span>Bytes</span><strong>{fmtBytes(wiresharkSnapshot.bytesCaptured)}</strong></div>
-                            </div>
-                            <div className="vc-ipa-grid vc-ipa-grid-tight">
-                                <StatRow label="Interface" value={wiresharkSnapshot.interfaceName} />
-                                <StatRow label="GeoIP" value={wiresharkSnapshot.geoEnabled ? "MaxMind + HTTP" : "HTTP lookup"} />
-                            </div>
-                            <div className="vc-ipa-counter-list">
-                                {topCounters(wiresharkSnapshot.transportCounters, 4).map(([name, count]) => (
-                                    <div className="vc-ipa-counter-row" key={`t-${name}`}>
-                                        <ProtocolBadge value={name} />
-                                        <strong>{count}</strong>
-                                    </div>
-                                ))}
-                                {topCounters(wiresharkSnapshot.protocolCounters, 4).map(([name, count]) => (
-                                    <div className="vc-ipa-counter-row" key={`p-${name}`}>
-                                        <ProtocolBadge value={name} />
-                                        <strong>{count}</strong>
-                                    </div>
-                                ))}
-                            </div>
-                            <div className="vc-ipa-table-scroll">
-                                <div className="vc-ipa-flow-table vc-ipa-flow-table-compact">
-                                    <div className="vc-ipa-flow-header">
-                                        <span>L4 / App</span>
-                                        <span>Src</span>
-                                        <span>Dst</span>
-                                        <span>Pkts</span>
-                                        <span>Info</span>
-                                    </div>
-                                    {wiresharkSnapshot.connections.length
-                                        ? wiresharkSnapshot.connections.slice(0, 8).map((c, i) => (
-                                            <div
-                                                className="vc-ipa-flow-row"
-                                                key={`${c.src}-${c.dst}-${c.protocol}-${c.streamId}-${i}`}
-                                                title={`${c.encrypted} · TTL ${c.ttl ?? c.hopLimit ?? "-"} · R${c.tcpRetransmissions ?? 0}/D${c.duplicateAcks ?? 0}/O${c.outOfOrder ?? 0} · ${c.dstAuthorizedLabel || c.srcAuthorizedLabel || c.dstLocation || ""}`}
-                                            >
-                                                <span className="vc-ipa-flow-protocol">
-                                                    <ProtocolBadge value={c.transport || "IP"} />
-                                                    <ProtocolBadge value={c.protocol || "OTHER"} />
-                                                </span>
-                                                <code>{c.src}:{c.sport ?? "-"}</code>
-                                                <code>{c.dst}:{c.dport ?? "-"}</code>
-                                                <span>{c.packets}</span>
-                                                <span>{c.lastDeltaMs != null ? `${c.lastDeltaMs.toFixed(1)}ms` : "-"} {c.tlsSni || c.stunType || c.encrypted}</span>
-                                            </div>
-                                        ))
-                                        : <div className="vc-ipa-empty">No flows yet.</div>}
-                                </div>
-                            </div>
-                        </section>
-
-                        <section className="vc-ipa-panel">
-                            <div className="vc-ipa-section-head">
-                                <div>
-                                    <span className="vc-ipa-eyebrow">FRAME LOG</span>
-                                    <h2 className="vc-ipa-heading">Recent packets</h2>
-                                </div>
-                                <span className="vc-ipa-count-pill">{wiresharkSnapshot.recentPackets?.length ?? 0}</span>
-                            </div>
-                            <div className="vc-ipa-table-scroll">
-                                <div className="vc-ipa-packet-table vc-ipa-packet-table-compact">
-                                    <div className="vc-ipa-packet-header">
-                                        <span>No.</span>
-                                        <span>Proto</span>
-                                        <span>Src</span>
-                                        <span>Dst</span>
-                                        <span>Len</span>
-                                        <span>Info</span>
-                                    </div>
-                                    {[...(wiresharkSnapshot.recentPackets ?? [])].reverse().slice(0, 10).map((p, i) => (
-                                        <div className="vc-ipa-packet-row" key={`${p.number ?? i}-${p.time}`} title={p.info}>
-                                            <code>{p.number ?? "-"}</code>
-                                            <span className="vc-ipa-flow-protocol">
-                                                <ProtocolBadge value={p.transport || "IP"} />
-                                                <ProtocolBadge value={p.protocol || "OTHER"} />
+                            <span className="vc-ipa-status-pill">{liveCount ? `${liveCount} live` : "IDLE"}</span>
+                        </div>
+                        <div className="vc-ipa-kpis vc-ipa-kpis-compact vc-ipa-kpis-4">
+                            <div className="vc-ipa-kpi"><span>PC</span><strong>{pcCount}</strong></div>
+                            <div className="vc-ipa-kpi"><span>Mobile</span><strong>{mobileCount}</strong></div>
+                            <div className="vc-ipa-kpi"><span>Console</span><strong>{consoleCount}</strong></div>
+                            <div className="vc-ipa-kpi"><span>Other</span><strong>{otherDeviceCount}</strong></div>
+                        </div>
+                        <div className="vc-ipa-device-list">
+                            {s.participants.length
+                                ? s.participants.map(participant => (
+                                    <div
+                                        key={`device-${participant.id}`}
+                                        className={"vc-ipa-device-row" + (participant.connected ? "" : " is-disconnected")}
+                                    >
+                                        <div className="vc-ipa-device-who">
+                                            <strong>{participant.name}{participant.self ? " (you)" : ""}</strong>
+                                            <span>
+                                                {participant.connected ? "In voice" : "Left"}
+                                                {participant.clients && participant.clients !== participant.device
+                                                    ? ` · also ${participant.clients}`
+                                                    : ""}
                                             </span>
-                                            <code>{p.src}:{p.sport ?? "-"}</code>
-                                            <code>{p.dst}:{p.dport ?? "-"}</code>
-                                            <span>{p.length}</span>
-                                            <span>{p.stunType || p.tlsSni || p.dnsQuery || p.info}</span>
                                         </div>
-                                    ))}
-                                </div>
+                                        <span className={"vc-ipa-device-tag " + deviceTagClass(participant.device)}>
+                                            {participant.device}
+                                        </span>
+                                    </div>
+                                ))
+                                : <div className="vc-ipa-empty">Join voice to detect devices.</div>}
+                        </div>
+                        <p className="vc-ipa-panel-note">PC, Mobile, Console, Web, or VR from the voice client when Discord reports it. Xbox and PlayStation count as Console.</p>
+                    </section>
+
+                    <section className="vc-ipa-panel">
+                        <div className="vc-ipa-section-head">
+                            <div>
+                                <span className="vc-ipa-eyebrow">YOUR CALL</span>
+                                <h2 className="vc-ipa-heading">Quality and transport</h2>
                             </div>
-                        </section>
-                    </div>
+                            <span className={"vc-ipa-status-pill" + (s.connected ? " is-ok" : "")}>{s.quality}</span>
+                        </div>
+                        <div className="vc-ipa-kpis vc-ipa-kpis-compact">
+                            <div className="vc-ipa-kpi"><span>RTT</span><strong>{fmt(s.rttMs, "ms")}</strong></div>
+                            <div className="vc-ipa-kpi"><span>Jitter</span><strong>{fmt(s.jitterMs, "ms", 1)}</strong></div>
+                            <div className="vc-ipa-kpi"><span>Loss</span><strong>{fmt(s.packetLossPct, "%", 1)}</strong></div>
+                            <div className="vc-ipa-kpi"><span>Bitrate</span><strong>{fmt(s.bitrateKbps, "k")}</strong></div>
+                            <div className="vc-ipa-kpi"><span>Lost pkts</span><strong>{s.packetsLost ?? "-"}</strong></div>
+                        </div>
+                        <div className="vc-ipa-grid vc-ipa-grid-tight">
+                            <StatRow label="RTC" value={s.state} />
+                            <StatRow label="DTLS" value={s.dtlsState} />
+                            <StatRow label="SRTP" value={s.srtpCipher} />
+                            <StatRow label="Codecs" value={s.audioCodecs.length ? s.audioCodecs.join(", ") : "-"} />
+                            <StatRow label="Server" value={s.hostname} />
+                            <StatRow label="Remote" value={dest.endpoint} />
+                            <StatRow label="Location" value={dest.location} />
+                            <StatRow label="Network" value={dest.isp} />
+                            <StatRow label="ICE path" value={dest.candidateType} />
+                            <StatRow label="Transport" value={dest.transport} />
+                        </div>
+                        <DestinationMap dest={dest} />
+                    </section>
+
+                    <section className="vc-ipa-panel">
+                        <div className="vc-ipa-section-head">
+                            <div>
+                                <span className="vc-ipa-eyebrow">CAPTURE</span>
+                                <h2 className="vc-ipa-heading">TShark flows</h2>
+                            </div>
+                            <span className={"vc-ipa-status-pill" + (wiresharkSnapshot.running ? " is-ok" : "")}>
+                                {wiresharkSnapshot.running ? "ACTIVE" : "OFF"}
+                            </span>
+                        </div>
+                        <div className="vc-ipa-kpis vc-ipa-kpis-compact">
+                            <div className="vc-ipa-kpi"><span>Frames</span><strong>{wiresharkSnapshot.packetsCaptured}</strong></div>
+                            <div className="vc-ipa-kpi"><span>pps</span><strong>{Number(wiresharkSnapshot.packetsPerSecond ?? 0).toFixed(0)}</strong></div>
+                            <div className="vc-ipa-kpi"><span>Flows</span><strong>{wiresharkSnapshot.connections.length}</strong></div>
+                            <div className="vc-ipa-kpi"><span>Wire</span><strong>{fmtRate(wiresharkSnapshot.bitsPerSecond)}</strong></div>
+                            <div className="vc-ipa-kpi"><span>Bytes</span><strong>{fmtBytes(wiresharkSnapshot.bytesCaptured)}</strong></div>
+                        </div>
+                        <div className="vc-ipa-grid vc-ipa-grid-tight">
+                            <StatRow label="Interface" value={wiresharkSnapshot.interfaceName} />
+                            <StatRow label="GeoIP" value={wiresharkSnapshot.geoEnabled ? "MaxMind + HTTP" : "HTTP lookup"} />
+                        </div>
+                        <div className="vc-ipa-counter-list">
+                            {topCounters(wiresharkSnapshot.transportCounters, 4).map(([name, count]) => (
+                                <div className="vc-ipa-counter-row" key={`t-${name}`}>
+                                    <ProtocolBadge value={name} />
+                                    <strong>{count}</strong>
+                                </div>
+                            ))}
+                            {topCounters(wiresharkSnapshot.protocolCounters, 4).map(([name, count]) => (
+                                <div className="vc-ipa-counter-row" key={`p-${name}`}>
+                                    <ProtocolBadge value={name} />
+                                    <strong>{count}</strong>
+                                </div>
+                            ))}
+                        </div>
+                        <div className="vc-ipa-table-scroll">
+                            <div className="vc-ipa-flow-table vc-ipa-flow-table-compact">
+                                <div className="vc-ipa-flow-header">
+                                    <span>L4 / App</span>
+                                    <span>Src</span>
+                                    <span>Dst</span>
+                                    <span>Pkts</span>
+                                    <span>Info</span>
+                                </div>
+                                {wiresharkSnapshot.connections.length
+                                    ? wiresharkSnapshot.connections.slice(0, 8).map((c, i) => (
+                                        <div
+                                            className="vc-ipa-flow-row"
+                                            key={`${c.src}-${c.dst}-${c.protocol}-${c.streamId}-${i}`}
+                                            title={`${c.encrypted} · TTL ${c.ttl ?? c.hopLimit ?? "-"} · R${c.tcpRetransmissions ?? 0}/D${c.duplicateAcks ?? 0}/O${c.outOfOrder ?? 0} · ${c.dstAuthorizedLabel || c.srcAuthorizedLabel || c.dstLocation || ""}`}
+                                        >
+                                            <span className="vc-ipa-flow-protocol">
+                                                <ProtocolBadge value={c.transport || "IP"} />
+                                                <ProtocolBadge value={c.protocol || "OTHER"} />
+                                            </span>
+                                            <code>{c.src}:{c.sport ?? "-"}</code>
+                                            <code>{c.dst}:{c.dport ?? "-"}</code>
+                                            <span>{c.packets}</span>
+                                            <span>{c.lastDeltaMs != null ? `${c.lastDeltaMs.toFixed(1)}ms` : "-"} {c.tlsSni || c.stunType || c.encrypted}</span>
+                                        </div>
+                                    ))
+                                    : <div className="vc-ipa-empty">No flows yet.</div>}
+                            </div>
+                        </div>
+                    </section>
+
+                    <section className="vc-ipa-panel">
+                        <div className="vc-ipa-section-head">
+                            <div>
+                                <span className="vc-ipa-eyebrow">FRAME LOG</span>
+                                <h2 className="vc-ipa-heading">Recent packets</h2>
+                            </div>
+                            <span className="vc-ipa-count-pill">{wiresharkSnapshot.recentPackets?.length ?? 0}</span>
+                        </div>
+                        <div className="vc-ipa-table-scroll">
+                            <div className="vc-ipa-packet-table vc-ipa-packet-table-compact">
+                                <div className="vc-ipa-packet-header">
+                                    <span>No.</span>
+                                    <span>Proto</span>
+                                    <span>Src</span>
+                                    <span>Dst</span>
+                                    <span>Len</span>
+                                    <span>Info</span>
+                                </div>
+                                {[...(wiresharkSnapshot.recentPackets ?? [])].reverse().slice(0, 10).map((p, i) => (
+                                    <div className="vc-ipa-packet-row" key={`${p.number ?? i}-${p.time}`} title={p.info}>
+                                        <code>{p.number ?? "-"}</code>
+                                        <span className="vc-ipa-flow-protocol">
+                                            <ProtocolBadge value={p.transport || "IP"} />
+                                            <ProtocolBadge value={p.protocol || "OTHER"} />
+                                        </span>
+                                        <code>{p.src}:{p.sport ?? "-"}</code>
+                                        <code>{p.dst}:{p.dport ?? "-"}</code>
+                                        <span>{p.length}</span>
+                                        <span>{p.stunType || p.tlsSni || p.dnsQuery || p.info}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </section>
+                </div>
             </div>
             {!min && !max && OVERLAY_EDGES.map(edge => (
                 <div
@@ -2780,7 +3348,7 @@ async function refreshStats() {
                 void ensureGeo(key);
         }
         void syncVoiceCapture();
-    paint();
+        paint();
     } finally {
         refreshBusy = false;
         if (mount) schedulePoll();
@@ -2863,6 +3431,10 @@ export default definePlugin({
         },
         RTC_CONNECTION_STATE() {
             void refreshStats();
+        },
+        PRESENCE_UPDATES() {
+            if (inVoiceNow() || stats.participants.length)
+                void refreshStats();
         }
     },
 

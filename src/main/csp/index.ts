@@ -60,6 +60,14 @@ export const CspPolicies: PolicyMap = {
     "archive.org": ConnectSrc,
     "*.archive.org": ConnectSrc,
     "translate-pa.googleapis.com": ConnectSrc, // Google Translate API
+    "huggingface.co": ImageScriptsAndCssSrc, // LiveVoiceTranslate Whisper models
+    "*.huggingface.co": ImageScriptsAndCssSrc,
+    "*.hf.co": ImageScriptsAndCssSrc,
+    "*.xethub.hf.co": ImageScriptsAndCssSrc,
+    "www.edigitalagency.com.au": ImageSrc, // ARP OnlyFans preset art
+    "static.wikia.nocookie.net": ImageSrc, // ARP Camera preset art
+    "static-prod.logosoftwear.com": ImageSrc, // ARP Harvard Online preset art
+    "media3.giphy.com": ImageAndMediaSrc, // ARP Harvard verified gif
     "*.vencord.dev": ImageSrc, // VenCloud (api.vencord.dev) and Badges (badges.vencord.dev)
     "manti.vendicated.dev": ImageSrc, // ReviewDB API
     "decor.fieryflames.dev": ConnectSrc, // Decor API
@@ -122,7 +130,7 @@ const patchCsp = (headers: PolicyMap) => {
         // we could make unsafe-inline safe by using strict-dynamic with a random nonce on our Vencord loader script https://content-security-policy.com/strict-dynamic/
         // HOWEVER, at the time of writing (24 Jan 2025), Discord is INSANE and also uses unsafe-inline
         // Once they stop using it, we also should
-        pushDirective("script-src", "'unsafe-inline'", "'unsafe-eval'");
+        pushDirective("script-src", "'unsafe-inline'", "'unsafe-eval'", "'wasm-unsafe-eval'");
 
         for (const directive of ["style-src", "connect-src", "img-src", "font-src", "media-src", "worker-src"]) {
             pushDirective(directive, "blob:", "data:", "vencord:", "vesktop:");

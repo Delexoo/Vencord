@@ -300,6 +300,85 @@
 
 .vc-ipa-kpis-compact { gap: 3px; margin: 3px 0 4px; }
 
+.vc-ipa-device-list {
+    display: grid;
+    gap: 4px;
+}
+
+.vc-ipa-device-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
+    padding: 4px 6px;
+    border: 1px solid var(--background-modifier-accent, rgba(255, 255, 255, 0.08));
+    border-radius: 6px;
+    background: var(--background-tertiary, rgba(255, 255, 255, 0.05));
+}
+
+.vc-ipa-device-row.is-disconnected {
+    opacity: 0.62;
+}
+
+.vc-ipa-device-who {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.vc-ipa-device-who strong {
+    overflow: hidden;
+    font-size: 11px;
+    line-height: 1.15;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vc-ipa-device-who span {
+    overflow: hidden;
+    color: var(--text-muted, #949ba4);
+    font-size: 8px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vc-ipa-device-tag {
+    flex: none;
+    padding: 2px 7px;
+    border-radius: 999px;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.vc-ipa-device-tag.is-pc {
+    background: color-mix(in srgb, var(--status-positive, #23a55a) 22%, transparent);
+    color: var(--status-positive, #23a55a);
+}
+
+.vc-ipa-device-tag.is-mobile {
+    background: color-mix(in srgb, var(--blue-345, #00a8fc) 22%, transparent);
+    color: var(--blue-345, #00a8fc);
+}
+
+.vc-ipa-device-tag.is-web {
+    background: color-mix(in srgb, var(--yellow-300, #faa61a) 22%, transparent);
+    color: var(--yellow-300, #faa61a);
+}
+
+.vc-ipa-device-tag.is-console,
+.vc-ipa-device-tag.is-vr {
+    background: color-mix(in srgb, var(--purple-345, #c44ef9) 22%, transparent);
+    color: var(--purple-345, #c44ef9);
+}
+
+.vc-ipa-device-tag.is-unknown {
+    background: var(--background-modifier-hover, rgba(255, 255, 255, 0.08));
+    color: var(--text-muted, #949ba4);
+}
+
 .vc-ipa-badges { flex-wrap: wrap; gap: 4px; margin: 0 0 4px; }
 .vc-ipa-badge {
     padding: 2px 6px;
@@ -461,6 +540,91 @@
     flex-wrap: wrap;
     gap: 6px;
     margin: 0 0 8px;
+}
+
+.vc-ipa-connections {
+    margin: 0 0 8px;
+}
+
+.vc-ipa-connections > em {
+    display: block;
+    margin-bottom: 4px;
+    color: var(--text-muted, #949ba4);
+    font-size: 9px;
+    font-style: normal;
+    font-weight: 800;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+.vc-ipa-conn-empty {
+    color: var(--text-muted, #949ba4);
+    font-size: 10px;
+}
+
+.vc-ipa-conn-list {
+    display: grid;
+    gap: 4px;
+}
+
+.vc-ipa-conn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
+    padding: 5px 6px;
+    border: 1px solid var(--background-modifier-accent, rgba(255, 255, 255, 0.08));
+    border-radius: 6px;
+    background: var(--background-tertiary, rgba(255, 255, 255, 0.05));
+    color: inherit;
+    cursor: pointer;
+    text-align: left;
+}
+
+.vc-ipa-conn:hover {
+    border-color: var(--interactive-active, #5865f2);
+}
+
+.vc-ipa-conn-icon,
+.vc-ipa-conn-fallback {
+    width: 18px;
+    height: 18px;
+    flex: none;
+    border-radius: 4px;
+}
+
+.vc-ipa-conn-fallback {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(88, 101, 242, 0.28);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 800;
+}
+
+.vc-ipa-conn span {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.vc-ipa-conn strong {
+    overflow: hidden;
+    font-size: 11px;
+    line-height: 1.15;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.vc-ipa-conn em {
+    overflow: hidden;
+    color: var(--text-muted, #949ba4);
+    font-size: 9px;
+    font-style: normal;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 .vc-ipa-tip-btn {
     display: inline-flex;
@@ -817,52 +981,30 @@
     font-size: 9px;
 }
 .vc-ipa-map {
-    margin-top: 4px;
-}
-
-.vc-ipa-map-frame {
-    display: block;
-    width: 100%;
-    height: 168px;
-    border: 0;
-    border-radius: 6px;
-    background: var(--background-tertiary, #1a1b1e);
-}
-
-.vc-ipa-map.is-compact .vc-ipa-map-frame {
-    height: 88px;
-}
-
-.vc-ipa-root.is-max .vc-ipa-map.is-compact .vc-ipa-map-frame {
-    height: 148px;
-}
-
-.vc-ipa-map-empty {
-    margin-top: 4px;
-    padding: 6px;
-    border: 1px dashed var(--background-modifier-accent, rgba(255, 255, 255, 0.12));
-    border-radius: 6px;
-    color: var(--text-muted, #949ba4);
-    font-size: 10px;
+    margin-top: 6px;
 }
 
 .vc-ipa-map-open {
     display: block;
     width: 100%;
-    margin-top: 4px;
-    padding: 5px 8px;
+    padding: 8px 10px;
     border: 0;
-    border-radius: 5px;
-    background: var(--background-modifier-hover, rgba(255, 255, 255, 0.08));
-    color: var(--interactive-normal, #dbdee1);
+    border-radius: 6px;
+    background: rgba(88, 101, 242, 0.72);
+    color: #fff;
     cursor: pointer;
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 700;
 }
 
-.vc-ipa-map-open:hover {
-    background: var(--background-modifier-active, rgba(255, 255, 255, 0.14));
-    color: var(--interactive-active, #fff);
+.vc-ipa-map-open:hover:not(:disabled) {
+    background: rgba(88, 101, 242, 0.9);
+}
+
+.vc-ipa-map-open:disabled {
+    background: var(--background-modifier-hover, rgba(255, 255, 255, 0.08));
+    color: var(--text-muted, #949ba4);
+    cursor: default;
 }
 
 .vc-ipa-root.is-max .vc-ipa-user-grid {
@@ -911,7 +1053,9 @@
 #vc-ipa-host .vc-ipa-value,
 #vc-ipa-host .vc-ipa-kpi strong,
 #vc-ipa-host .vc-ipa-user-copy strong,
+#vc-ipa-host .vc-ipa-device-who strong,
 #vc-ipa-host .vc-ipa-tooltip-head strong,
+#vc-ipa-host .vc-ipa-conn strong,
 #vc-ipa-host .vc-ipa-tooltip-grid code,
 #vc-ipa-host .vc-ipa-tooltip-grid strong,
 #vc-ipa-host .vc-ipa-ip-addr,
@@ -924,15 +1068,18 @@
 #vc-ipa-host .vc-ipa-eyebrow,
 #vc-ipa-host .vc-ipa-kpi span,
 #vc-ipa-host .vc-ipa-user-copy span,
+#vc-ipa-host .vc-ipa-device-who span,
 #vc-ipa-host .vc-ipa-tooltip-head span,
 #vc-ipa-host .vc-ipa-tooltip-grid > span,
 #vc-ipa-host .vc-ipa-tooltip-section > em,
+#vc-ipa-host .vc-ipa-connections > em,
+#vc-ipa-host .vc-ipa-conn em,
+#vc-ipa-host .vc-ipa-conn-empty,
 #vc-ipa-host .vc-ipa-tooltip-warning,
 #vc-ipa-host .vc-ipa-bone,
 #vc-ipa-host .vc-ipa-empty,
 #vc-ipa-host .vc-ipa-note,
 #vc-ipa-host .vc-ipa-panel-note,
-#vc-ipa-host .vc-ipa-map-empty,
 #vc-ipa-host .vc-ipa-ip-meta,
 #vc-ipa-host .vc-ipa-status-pill,
 #vc-ipa-host .vc-ipa-badge:not(.is-on) {

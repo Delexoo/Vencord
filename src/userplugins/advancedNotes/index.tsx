@@ -4,18 +4,22 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { Delexo } from "../_delexo/author";
-import { mutationClassMatches, scheduleOnce } from "../_delexo/idle";
+import { NavContextMenuPatchCallback } from "@api/ContextMenu";
 import { definePluginSettings } from "@api/Settings";
 import ErrorBoundary from "@components/ErrorBoundary";
 import { classNameFactory } from "@utils/css";
 import definePlugin, { OptionType } from "@utils/types";
 import { User } from "@vencord/discord-types";
-import { Button, Text, createRoot, useEffect, useState } from "@webpack/common";
+import { findCssClassesLazy } from "@webpack";
+import { Button, Menu, Text, createRoot, useEffect, useState } from "@webpack/common";
 import type { Root } from "react-dom/client";
 
+import { Delexo } from "../_delexo/author";
+import { mutationClassMatches, scheduleOnce } from "../_delexo/idle";
 import { AdvancedNoteField, getNotesDirPath, listNotesCount, openAdvancedNoteModal, openNotesFolder } from "./NoteModal";
 import managedStyle from "./style.css?managed";
+
+const DMSideBarClasses = findCssClassesLazy("widgetPreviews");
 
 const cl = classNameFactory("vc-advanced-note-");
 
@@ -96,6 +100,38 @@ export const ProfileNotesButton = ErrorBoundary.wrap(function ProfileNotesButton
     );
 }, { noop: true });
 
+const userNotesMenuPatch: NavContextMenuPatchCallback = (children, { user }: { user?: User; }) => {
+    if (!user?.id) return;
+    children.push(
+        <Menu.MenuItem
+            id="vc-advanced-notes"
+            label="Advanced Notes"
+            action={() => openAdvancedNoteModal(user.id)}
+        />
+    );
+};
+
+function notesAlreadyMounted(scope?: ParentNode | null, ignoreHost?: Element | null) {
+    const root = scope ?? document;
+    for (const el of root.querySelectorAll?.(".vc-advanced-note-profile-actions, .vc-advanced-note-wrap, #vc-advanced-note-popout-host, #vc-advanced-note-profile-host") ?? []) {
+        if (ignoreHost && (el === ignoreHost || ignoreHost.contains(el) || el.contains(ignoreHost))) continue;
+        return true;
+    }
+    return false;
+}
+
+function normalizeText(s: string | null | undefined) {
+    return (s ?? "").replace(/\s+/g, " ").trim();
+}
+
+function isNoteLabelText(t: string) {
+    return /note \(only visible to you\)/i.test(t);
+}
+
+function isNotePlaceholderText(t: string) {
+    return /click to add a note/i.test(t) || /^add a note$/i.test(t);
+}
+
 function findUserIdNear(el: Element | null): string | null {
     let cur: Element | null = el;
     for (let i = 0; i < 24 && cur; i++) {
@@ -114,14 +150,22 @@ function findUserIdNear(el: Element | null): string | null {
     return null;
 }
 
+function isViewProfileControl(el: HTMLElement) {
+    const t = normalizeText(el.textContent);
+    const aria = normalizeText(el.getAttribute("aria-label"));
+    const blob = `${t} ${aria}`;
+    if (/view\s+(full\s+)?profile/i.test(blob)) return true;
+    const href = String(el.getAttribute("href") ?? "");
+    return /\/users\/\d+/.test(href) && /profile/i.test(blob);
+}
+
 function findViewFullProfileButton(): HTMLElement | null {
     const roots = document.querySelectorAll<HTMLElement>(
-        '[class*="userPopoutOuter"], [class*="userPopoutInner"], [class*="userProfileOuter"], [class*="biteSize"]'
+        '[class*="userPopoutOuter"], [class*="userPopoutInner"], [class*="userProfileOuter"], [class*="userProfileInner"], [class*="biteSize"], [class*="overlayTitle"], [class*="profileActions"]'
     );
     for (const root of roots) {
-        for (const el of root.querySelectorAll<HTMLElement>("button, [role='button']")) {
-            const t = (el.textContent || "").replace(/\s+/g, " ").trim();
-            if (/^view full profile$/i.test(t)) return el;
+        for (const el of root.querySelectorAll<HTMLElement>("button, a, [role='button']")) {
+            if (isViewProfileControl(el)) return el;
         }
     }
     return null;
@@ -150,23 +194,51 @@ function findProfileButtonRow(viewFull: HTMLElement): HTMLElement {
     );
 }
 
-function placePopoutButton() {
+function findPopoutRoot(from: HTMLElement | null): HTMLElement | null {
+    return from?.closest<HTMLElement>(
+        '[class*="userPopoutOuter"], [class*="userPopoutInner"], [class*="userProfileOuter"], [class*="biteSize"]'
+    ) ?? null;
+}
+
+function findPopoutMountTarget(): { row: HTMLElement; mount: HTMLElement; userId: string; } | null {
     const viewFull = findViewFullProfileButton();
-    if (!viewFull) {
-        // popout closed
+    if (viewFull) {
+        const userId = findUserIdNear(viewFull);
+        const row = findProfileButtonRow(viewFull);
+        const mount = row.parentElement;
+        if (userId && mount) return { row, mount, userId };
+    }
+
+    const roots = document.querySelectorAll<HTMLElement>(
+        '[class*="userPopoutOuter"], [class*="userPopoutInner"], [class*="biteSize"]'
+    );
+    for (const root of roots) {
+        const overlay = root.querySelector<HTMLElement>(
+            '[class*="overlayButtons"], [class*="buttonsContainer"], [class*="profileButtons"], [class*="actionButtons"]'
+        );
+        const row = overlay ?? root;
+        const userId = findUserIdNear(row);
+        if (!userId) continue;
+        return { row, mount: row.parentElement ?? root, userId };
+    }
+    return null;
+}
+
+function placePopoutButton() {
+    const target = findPopoutMountTarget();
+    if (!target) {
         if (popoutHost && !document.body.contains(popoutHost)) removePopoutButton();
         return;
     }
 
-    const userId = findUserIdNear(viewFull);
-    if (!userId) return;
-
-    const row = findProfileButtonRow(viewFull);
-    const mount = row.parentElement;
-    if (!mount) return;
+    const { row, mount, userId } = target;
+    const popout = findPopoutRoot(row) ?? mount;
+    if (notesAlreadyMounted(popout, popoutHost)) {
+        removePopoutButton();
+        return;
+    }
 
     if (popoutHost?.isConnected && popoutHost.previousElementSibling === row) {
-        // already under the profile button row; remount if user changed
         const currentId = popoutHost.getAttribute("data-user-id");
         if (currentId === userId) return;
         removePopoutButton();
@@ -179,7 +251,6 @@ function placePopoutButton() {
     popoutHost.className = "vc-advanced-note-popout-host";
     popoutHost.setAttribute("data-user-id", userId);
 
-    // Mount below the entire button row, not beside View Full Profile
     if (row.nextSibling)
         mount.insertBefore(popoutHost, row.nextSibling);
     else
@@ -189,30 +260,29 @@ function placePopoutButton() {
     popoutRoot.render(<ProfileNotesButton userId={userId} />);
 }
 
-function normalizeText(s: string | null | undefined) {
-    return (s ?? "").replace(/\s+/g, " ").trim();
+function findProfileRoot(): HTMLElement | null {
+    return (
+        document.querySelector<HTMLElement>('[class*="userProfileModal"]') ||
+        document.querySelector<HTMLElement>('[class*="profilePanel"]')
+    );
 }
 
 function findFullProfileNoteSection(): HTMLElement | null {
-    const profileRoot =
-        document.querySelector<HTMLElement>('[class*="userProfileModal"]') ||
-        document.querySelector<HTMLElement>('[class*="userProfileOuter"]') ||
-        document.querySelector<HTMLElement>('[class*="profilePanel"]');
-
+    const profileRoot = findProfileRoot();
     if (!profileRoot) return null;
-    const scope = profileRoot;
+
     let labelEl: HTMLElement | null = null;
     let fieldEl: HTMLElement | null = null;
 
-    for (const el of scope.querySelectorAll<HTMLElement>(
+    for (const el of profileRoot.querySelectorAll<HTMLElement>(
         "span, div, h2, h3, label, p, button, [role='button']"
     )) {
-        if (el.closest("#vc-advanced-note-popout-host, #vc-advanced-note-profile-host")) continue;
+        if (el.closest("#vc-advanced-note-popout-host, #vc-advanced-note-profile-host, .vc-advanced-note-profile-actions")) continue;
         if (el.children.length > 5) continue;
 
         const t = normalizeText(el.textContent);
-        if (!labelEl && /^note \(only visible to you\)$/i.test(t)) labelEl = el;
-        if (!fieldEl && /^click to add a note$/i.test(t)) fieldEl = el;
+        if (!labelEl && isNoteLabelText(t)) labelEl = el;
+        if (!fieldEl && isNotePlaceholderText(t)) fieldEl = el;
         if (labelEl && fieldEl) break;
     }
 
@@ -230,13 +300,26 @@ function findFullProfileNoteSection(): HTMLElement | null {
     for (let i = 0; i < 6 && section?.parentElement; i++) {
         const parent = section.parentElement;
         const text = normalizeText(parent.textContent);
-        if (/note.*only visible to you/i.test(text) && /click to add a note/i.test(text)) {
+        if (/note/i.test(text) && (isNotePlaceholderText(text) || /only visible to you/i.test(text)))
             return parent;
-        }
         section = parent;
     }
 
     return labelEl?.parentElement ?? fieldEl?.parentElement ?? null;
+}
+
+function findFullProfileMount(): HTMLElement | null {
+    const section = findFullProfileNoteSection();
+    if (section) return section;
+
+    const profileRoot = findProfileRoot();
+    if (!profileRoot) return null;
+
+    return (
+        profileRoot.querySelector<HTMLElement>('[class*="widgetPreviews"]')?.parentElement
+        ?? profileRoot.querySelector<HTMLElement>('[class*="overlayButtons"], [class*="profileButtons"], [class*="actionButtons"]')?.parentElement
+        ?? profileRoot
+    );
 }
 
 function hideDefaultNoteUi(section: HTMLElement, keepHost: HTMLElement | null) {
@@ -245,11 +328,9 @@ function hideDefaultNoteUi(section: HTMLElement, keepHost: HTMLElement | null) {
         if (keepHost && (el === keepHost || keepHost.contains(el) || el.contains(keepHost))) return;
 
         const t = normalizeText(el.textContent);
-        const isNoteLabel = /^note \(only visible to you\)$/i.test(t);
-        const isNotePlaceholder = /^click to add a note$/i.test(t);
         const isNoteInput = el.matches("textarea, [contenteditable='true'], input");
 
-        if (isNoteLabel || isNotePlaceholder || isNoteInput) {
+        if (isNoteLabelText(t) || isNotePlaceholderText(t) || isNoteInput) {
             el.style.display = "none";
             el.setAttribute("data-vc-advanced-note-hidden", "1");
         }
@@ -275,36 +356,44 @@ function removeProfileNoteButton() {
 }
 
 function placeFullProfileNote() {
-    const section = findFullProfileNoteSection();
-    if (!section) {
+    const mount = findFullProfileMount();
+    if (!mount) {
         if (profileHost && !document.body.contains(profileHost)) removeProfileNoteButton();
         return;
     }
 
-    const userId = findUserIdNear(section);
+    const userId = findUserIdNear(mount);
     if (!userId) return;
 
     const profileScope =
-        section.closest<HTMLElement>('[class*="userProfileModal"]') ||
-        section.closest<HTMLElement>('[class*="userProfileOuter"]') ||
-        section.closest<HTMLElement>('[class*="profilePanel"]') ||
-        section;
+        mount.closest<HTMLElement>('[class*="userProfileModal"]') ||
+        mount.closest<HTMLElement>('[class*="userProfileOuter"]') ||
+        mount.closest<HTMLElement>('[class*="profilePanel"]') ||
+        mount;
 
-    for (const el of profileScope.querySelectorAll<HTMLElement>("span, div, h2, h3, label, p")) {
-        if (el.closest("#vc-advanced-note-profile-host")) continue;
-        const t = normalizeText(el.textContent);
-        if (/^note \(only visible to you\)$/i.test(t) || /^click to add a note$/i.test(t))
-            el.style.display = "none";
+    if (notesAlreadyMounted(profileScope, profileHost)) {
+        removeProfileNoteButton();
+        return;
     }
 
-    hideDefaultNoteUi(section, profileHost);
+    const noteSection = findFullProfileNoteSection();
+    if (noteSection) {
+        for (const el of profileScope.querySelectorAll<HTMLElement>("span, div, h2, h3, label, p")) {
+            if (el.closest("#vc-advanced-note-profile-host, .vc-advanced-note-profile-actions")) continue;
+            const t = normalizeText(el.textContent);
+            if (isNoteLabelText(t) || isNotePlaceholderText(t))
+                el.style.display = "none";
+        }
+        hideDefaultNoteUi(noteSection, profileHost);
+    }
 
-    if (!profileHost || !section.contains(profileHost)) {
+    const hostParent = noteSection ?? mount;
+    if (!profileHost || !hostParent.contains(profileHost)) {
         removeProfileNoteButton();
         profileHost = document.createElement("div");
         profileHost.id = "vc-advanced-note-profile-host";
         profileHost.className = "vc-advanced-note-profile-host";
-        section.appendChild(profileHost);
+        hostParent.appendChild(profileHost);
         profileRoot = createRoot(profileHost);
     }
 
@@ -328,7 +417,7 @@ function queuePopoutButton() {
 
 export default definePlugin({
     name: "AdvancedNotes",
-    description: "Replaces profile Note with Advanced Notes, including a quick button under View Full Profile",
+    description: "Adds an Advanced Notes button on user profiles and the right-click user menu",
     tags: ["Utility"],
     searchTerms: ["note", "notes", "markdown", "md", "profile", "delexo"],
     authors: [Delexo],
@@ -336,9 +425,30 @@ export default definePlugin({
     settings,
     managedStyle,
 
+    contextMenus: {
+        "user-context": userNotesMenuPatch,
+        "user-profile-actions": userNotesMenuPatch,
+        "user-profile-overflow-menu": userNotesMenuPatch
+    },
+
     patches: [
         {
+            find: ".SIDEBAR,disableToolbar:",
+            replacement: {
+                match: /user:(\i),widgets:.{0,100}?\}\),(?=.{0,100}unownedWishlistItems:\i,wishlistId:\i)/,
+                replace: "$&$self.renderNotesButton({user:$1,isSideBar:true}),"
+            }
+        },
+        {
+            find: '"UserProfilePopout");',
+            replacement: {
+                match: /user:(\i),widgets:.{0,100}?\}\),/,
+                replace: "$&$self.renderNotesButton({user:$1}),"
+            }
+        },
+        {
             find: "Messages.NOTE_PLACEHOLDER",
+            noWarn: true,
             replacement: {
                 match: /function (\i)\((\i)\)\{/,
                 replace: "function $1($2){return $self.AdvancedNoteField($2);"
@@ -346,6 +456,7 @@ export default definePlugin({
         },
         {
             find: "#{intl::NOTE_PLACEHOLDER}",
+            noWarn: true,
             replacement: {
                 match: /function (\i)\((\i)\)\{/,
                 replace: "function $1($2){return $self.AdvancedNoteField($2);"
@@ -353,8 +464,22 @@ export default definePlugin({
         }
     ],
 
+    flux: {
+        USER_PROFILE_MODAL_OPEN() {
+            queueProfileNoteButton();
+        }
+    },
+
     AdvancedNoteField,
     ProfileNotesButton,
+
+    renderNotesButton: ErrorBoundary.wrap(({ user, isSideBar }: { user?: User; isSideBar?: boolean; }) => {
+        if (!user?.id) return null;
+        const button = <ProfileNotesButton user={user} isSideBar={isSideBar} />;
+        return isSideBar
+            ? <div className={DMSideBarClasses.widgetPreviews}>{button}</div>
+            : button;
+    }, { noop: true }),
 
     start() {
         queuePopoutButton();

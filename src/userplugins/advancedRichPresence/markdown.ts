@@ -118,6 +118,8 @@ function parseScalar(raw: string): string | number {
     if ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'"))) {
         try { return JSON.parse(t.startsWith("'") ? `"${t.slice(1, -1)}"` : t); } catch { return t.slice(1, -1); }
     }
+    // Discord snowflakes are 17–19 digits; Number() rounds them and breaks App IDs.
+    if (/^\d{16,}$/.test(t)) return t;
     if (/^-?\d+(\.\d+)?$/.test(t)) return Number(t);
     return t;
 }
@@ -145,7 +147,7 @@ export function parsePresetMarkdown(fileName: string, md: string): PresencePrese
     };
     for (const key of FIELD_KEYS) {
         if (meta[key] === undefined) continue;
-        (preset as any)[key] = meta[key];
+        (preset as any)[key] = key === "appID" ? String(meta[key]) : meta[key];
     }
     return preset;
 }
@@ -154,8 +156,8 @@ export function snapshotFields(store: PresenceFields): PresenceFields {
     const out: PresenceFields = {};
     for (const key of FIELD_KEYS) {
         const value = store[key];
-        if (value !== undefined && value !== null && value !== "")
-            (out as any)[key] = value;
+        if (value === undefined || value === null || value === "") continue;
+        (out as any)[key] = key === "appID" ? String(value) : value;
     }
     return out;
 }
@@ -166,7 +168,7 @@ export function applyFields(target: PresenceFields, fields: PresenceFields) {
         if (value === undefined || value === null || value === "")
             delete (target as any)[key];
         else
-            (target as any)[key] = value;
+            (target as any)[key] = key === "appID" ? String(value) : value;
     }
 }
 

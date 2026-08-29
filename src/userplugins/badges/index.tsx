@@ -241,7 +241,11 @@ async function syncShareToBio() {
             await patchOwnBio(bio => writeShare(bio, state, "zw"));
         }
     } catch (e) {
-        console.error("[Badges] failed to save client-side badge share", e);
+        try {
+            await patchOwnBio(bio => writeShare(bio, currentShareState(), "zw"));
+        } catch (inner) {
+            console.error("[Badges] failed to save client-side badge share", inner ?? e);
+        }
     }
 }
 

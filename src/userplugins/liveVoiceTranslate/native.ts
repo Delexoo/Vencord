@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-import { app, desktopCapturer, IpcMainInvokeEvent } from "electron";
+import { app, BrowserWindow, desktopCapturer, IpcMainInvokeEvent } from "electron";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 
@@ -18,18 +18,40 @@ function historyPath() {
     return join(historyRoot(), "history.json");
 }
 
+function collectDiscordSourceIds() {
+    const ids = new Set<string>();
+    for (const win of BrowserWindow.getAllWindows()) {
+        try {
+            const fromWin = (win as { getMediaSourceId?: () => string; }).getMediaSourceId?.();
+            if (fromWin) ids.add(fromWin);
+        } catch { /* ignore */ }
+        try {
+            const fromWc = (win.webContents as { getMediaSourceId?: () => string; }).getMediaSourceId?.();
+            if (fromWc) ids.add(fromWc);
+        } catch { /* ignore */ }
+    }
+    return ids;
+}
+
 export async function listDesktopAudioSources(_: IpcMainInvokeEvent) {
     try {
+        const discordIds = collectDiscordSourceIds();
         const sources = await desktopCapturer.getSources({
             types: ["screen", "window"],
             fetchWindowIcons: false
         });
-        const mapped = sources.map(s => ({
-            id: s.id,
-            name: s.name,
-            isDiscord: /discord/i.test(s.name)
-        }));
-        mapped.sort((a, b) => Number(b.isDiscord) - Number(a.isDiscord));
+        const mapped = sources.map(s => {
+            const id = String(s.id || "");
+            const name = String(s.name || "");
+            const isScreen = id.startsWith("screen:") || /^(Entire screen|Screen \d+)/i.test(name);
+            const isDiscord = (!isScreen && discordIds.has(id))
+                || (/discord|vesktop|armcord|webcord/i.test(name) && !isScreen);
+            return { id, name, isDiscord, isScreen };
+        });
+        mapped.sort((a, b) =>
+            Number(b.isDiscord) - Number(a.isDiscord)
+            || Number(b.isScreen) - Number(a.isScreen)
+        );
         return { ok: true, data: JSON.stringify(mapped) };
     } catch (e) {
         return { ok: false, data: String(e) };

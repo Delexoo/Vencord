@@ -36,14 +36,19 @@ export type EngineSnapshot = {
     history: HistoryRow[];
 };
 
+export type AudioSource = "discord" | "system" | "mic";
+
+export const SPECTRUM_BARS = 32;
+
 const TARGET_SR = 16000;
 const SPEECH_RMS = 0.012;
 const SILENCE_MS = 700;
 const MIN_SPEECH_MS = 450;
 const MAX_UTTER_MS = 8000;
 
-let fromLang = "tl";
+let fromLang = "auto";
 let toLang = "en";
+let audioSource: AudioSource = "discord";
 let listening = false;
 let ready = false;
 let status = "Ready";
@@ -55,6 +60,8 @@ let partial = false;
 
 let audioCtx: AudioContext | null = null;
 let processor: ScriptProcessorNode | null = null;
+let analyser: AnalyserNode | null = null;
+let freqBytes: Uint8Array | null = null;
 let activeStreams: MediaStream[] = [];
 let pcmBuf: Float32Array[] = [];
 let speechStartedAt = 0;
@@ -142,6 +149,56 @@ export function setLanguages(detect: string, target: string) {
     toLang = target || "en";
 }
 
+export function parseAudioSource(value: string): AudioSource {
+    switch (value) {
+        case "discord":
+        case "system":
+        case "mic":
+            return value;
+        default:
+            return "discord";
+    }
+}
+
+export function setAudioSource(source: AudioSource) {
+    audioSource = source;
+}
+
+export function getAudioSource() {
+    return audioSource;
+}
+
+export function fillSpectrum(out: Float32Array) {
+    const node = analyser;
+    const bins = freqBytes;
+    const ctx = audioCtx;
+    if (!listening || !node || !bins || !ctx) {
+        for (let i = 0; i < out.length; i++) out[i] *= 0.78;
+        return;
+    }
+    node.getByteFrequencyData(bins as Uint8Array);
+    const sr = ctx.sampleRate || TARGET_SR;
+    const binHz = sr / node.fftSize;
+    const minHz = 70;
+    const maxHz = Math.min(7000, sr * 0.48);
+    const n = bins.length;
+    for (let i = 0; i < out.length; i++) {
+        const t0 = i / out.length;
+        const t1 = (i + 1) / out.length;
+        const f0 = minHz * Math.pow(maxHz / minHz, t0);
+        const f1 = minHz * Math.pow(maxHz / minHz, t1);
+        let i0 = Math.floor(f0 / binHz);
+        let i1 = Math.ceil(f1 / binHz);
+        if (i0 < 1) i0 = 1;
+        if (i1 <= i0) i1 = i0 + 1;
+        if (i1 > n) i1 = n;
+        let sum = 0;
+        for (let b = i0; b < i1; b++) sum += bins[b];
+        const shaped = Math.pow(sum / ((i1 - i0) * 255), 0.7);
+        out[i] = out[i] * 0.36 + shaped * 0.64;
+    }
+}
+
 export function getSnapshot(): EngineSnapshot {
     return {
         ready,
@@ -174,6 +231,9 @@ function stopTracks() {
     activeStreams = [];
     try { processor?.disconnect(); } catch { /* ignore */ }
     processor = null;
+    try { analyser?.disconnect(); } catch { /* ignore */ }
+    analyser = null;
+    freqBytes = null;
     try { void audioCtx?.close(); } catch { /* ignore */ }
     audioCtx = null;
     pcmBuf = [];
@@ -205,35 +265,104 @@ function downsampleTo16k(input: Float32Array, inputRate: number) {
     return out;
 }
 
-async function getSystemAudioStream() {
-    if (!Native) throw new Error("Native helper unavailable. Use Discord desktop");
+type DesktopSource = {
+    id: string;
+    name: string;
+    isDiscord?: boolean;
+    isScreen?: boolean;
+};
+
+async function getMicStream() {
+    return await navigator.mediaDevices.getUserMedia({
+        audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+        },
+        video: false
+    });
+}
+
+async function listDesktopSources() {
+    if (!Native) throw new Error("Native helper unavailable. Fully quit Discord from the tray, then reopen.");
     const res = await Native.listDesktopAudioSources();
     if (!res.ok) throw new Error(res.data);
-    const sources = JSON.parse(res.data) as { id: string; name: string; isDiscord: boolean; }[];
-    if (!sources.length) throw new Error("No desktop audio sources found");
-    const preferred = sources.find(s => s.isDiscord) ?? sources[0];
-    const stream = await (navigator.mediaDevices as any).getUserMedia({
-        audio: {
-            mandatory: {
-                chromeMediaSource: "desktop"
+    const sources = JSON.parse(res.data) as DesktopSource[];
+    if (!Array.isArray(sources) || !sources.length) throw new Error("No desktop audio sources found");
+    return sources;
+}
+
+async function captureDesktop(filter: (s: DesktopSource) => boolean, emptyMsg: string) {
+    const sources = (await listDesktopSources()).filter(filter);
+    if (!sources.length) throw new Error(emptyMsg);
+
+    let lastError: unknown;
+    for (const preferred of sources) {
+        try {
+            const stream = await (navigator.mediaDevices as any).getUserMedia({
+                audio: {
+                    mandatory: {
+                        chromeMediaSource: "desktop",
+                        chromeMediaSourceId: preferred.id
+                    }
+                },
+                video: {
+                    mandatory: {
+                        chromeMediaSource: "desktop",
+                        chromeMediaSourceId: preferred.id,
+                        maxWidth: 2,
+                        maxHeight: 2
+                    }
+                }
+            });
+            for (const t of stream.getVideoTracks()) {
+                t.stop();
+                stream.removeTrack(t);
             }
-        },
-        video: {
-            mandatory: {
-                chromeMediaSource: "desktop",
-                chromeMediaSourceId: preferred.id,
-                maxWidth: 1,
-                maxHeight: 1
-            }
+            if (stream.getAudioTracks().length)
+                return stream as MediaStream;
+            for (const t of stream.getTracks()) t.stop();
+            lastError = new Error(`No audio on ${preferred.name}`);
+        } catch (e) {
+            lastError = e;
         }
-    });
-    for (const t of stream.getVideoTracks()) {
-        t.stop();
-        stream.removeTrack(t);
     }
-    if (!stream.getAudioTracks().length)
-        throw new Error("System/Discord audio not available");
-    return stream as MediaStream;
+
+    throw lastError instanceof Error ? lastError : new Error(emptyMsg);
+}
+
+async function getCaptureStream(source: AudioSource): Promise<{ stream: MediaStream; label: string; }> {
+    switch (source) {
+        case "mic":
+            return { stream: await getMicStream(), label: "Microphone" };
+        case "discord":
+            try {
+                return {
+                    stream: await captureDesktop(
+                        s => Boolean(s.isDiscord),
+                        "No Discord window found. Keep this app open and try again."
+                    ),
+                    label: "Discord"
+                };
+            } catch (e) {
+                const msg = String(e).replace(/^Error:\s*/, "");
+                if (/no audio/i.test(msg))
+                    throw new Error("Discord window has no audio. Use System audio to hear the call.");
+                throw e instanceof Error ? e : new Error(msg);
+            }
+        case "system":
+            return {
+                stream: await captureDesktop(
+                    s => Boolean(s.isScreen),
+                    "No system audio source found."
+                ),
+                label: "System audio"
+            };
+        default: {
+            const _: never = source;
+            return _;
+        }
+    }
 }
 
 async function flushUtterance() {
@@ -251,15 +380,17 @@ async function flushUtterance() {
         const merged = mergePcm(chunks);
         const rate = audioCtx?.sampleRate || TARGET_SR;
         const pcm16 = downsampleTo16k(merged, rate);
-        const text = await transcribePcm(pcm16, TARGET_SR, fromLang);
+        const heard = await transcribePcm(pcm16, TARGET_SR, fromLang);
+        const text = heard.text;
         if (!text) {
-            setStatus(listening ? "Listening" : "Ready");
+            setStatus(listening ? listenStatus() : "Ready");
             return;
         }
         lastOriginal = text;
+        const detect = heard.language || (fromLang === "auto" ? "auto" : fromLang);
         let translated = text;
         try {
-            const tr = await googleTranslate(text, fromLang, toLang);
+            const tr = await googleTranslate(text, detect, toLang);
             translated = tr.text || text;
         } catch {
             translated = text;
@@ -268,12 +399,27 @@ async function flushUtterance() {
         history.push({ original: text, translation: translated });
         if (history.length > MAX_HISTORY) history = history.slice(-MAX_HISTORY);
         schedulePersist();
-        setStatus(listening ? "Listening" : "Ready");
+        setStatus(listening ? listenStatus() : "Ready");
     } catch (e) {
         setStatus(String(e).slice(0, 80));
     } finally {
         partial = false;
         busyTranscribe = false;
+    }
+}
+
+function listenStatus() {
+    switch (audioSource) {
+        case "discord":
+            return "Listening to Discord";
+        case "system":
+            return "Listening to system audio";
+        case "mic":
+            return "Listening to microphone";
+        default: {
+            const _: never = audioSource;
+            return _;
+        }
     }
 }
 
@@ -308,31 +454,42 @@ function onAudioProcess(ev: AudioProcessingEvent) {
 
 export async function startListening() {
     if (listening) return;
-    if (!Native) {
-        setStatus("Needs Discord desktop app");
-        ready = false;
-        throw new Error("Native helper unavailable");
-    }
 
     setStatus("Loading model…");
     listening = true;
     try {
+        try {
+            audioCtx = new AudioContext({ sampleRate: TARGET_SR });
+        } catch {
+            audioCtx = new AudioContext();
+        }
+        try { await audioCtx.resume(); } catch { /* ignore */ }
+
         await ensureWhisper();
         ready = true;
+        if (audioCtx.state === "suspended") {
+            try { await audioCtx.resume(); } catch { /* ignore */ }
+        }
         setStatus("Starting capture…");
-        const stream = await getSystemAudioStream();
-        activeStreams = [stream];
-        audioCtx = new AudioContext();
-        const src = audioCtx.createMediaStreamSource(stream);
+        const captured = await getCaptureStream(audioSource);
+        activeStreams = [captured.stream];
+        const src = audioCtx.createMediaStreamSource(captured.stream);
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 512;
+        analyser.smoothingTimeConstant = 0.5;
+        analyser.minDecibels = -88;
+        analyser.maxDecibels = -20;
+        freqBytes = new Uint8Array(analyser.frequencyBinCount);
         processor = audioCtx.createScriptProcessor(4096, 1, 1);
         processor.onaudioprocess = onAudioProcess;
         const mute = audioCtx.createGain();
         mute.gain.value = 0;
+        src.connect(analyser);
         src.connect(processor);
         processor.connect(mute);
         mute.connect(audioCtx.destination);
 
-        setStatus("Listening");
+        setStatus(listenStatus());
         if (loopTimer != null) window.clearInterval(loopTimer);
         loopTimer = window.setInterval(() => {
             if (!listening) return;
