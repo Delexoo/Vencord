@@ -6,9 +6,11 @@
 
 import { definePluginSettings } from "@api/Settings";
 import definePlugin, { OptionType } from "@utils/types";
+import { UserStore } from "@webpack/common";
 
 import { Delexo } from "../_delexo/author";
 import { createShareSync, patchOwnBio, setOwnButtonShare, startLiveShare, stopLiveShare } from "../_delexo/liveShare";
+import { publishButtonShare } from "../_delexo/shareRegistry";
 import {
     isHttpUrl,
     writeShare,
@@ -61,6 +63,8 @@ function onShareChange() {
 async function syncShareToBio() {
     const data = currentShare();
     setOwnButtonShare(data);
+    const userId = UserStore.getCurrentUser()?.id;
+    if (userId) void publishButtonShare(userId, data);
     try {
         await patchOwnBio(bio => writeShare(bio, data));
     } catch (e) {

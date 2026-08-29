@@ -11,11 +11,12 @@ import definePlugin, { OptionType } from "@utils/types";
 import * as Engine from "./engine";
 import managedStyle from "./style.css?managed";
 
-const MIN_W = 220;
-const MIN_H = 118;
+const MIN_W = 176;
+const MIN_H = 110;
 const COMPACT_W = 292;
 const COMPACT_H = 268;
-const ADVANCED_EXTRA_H = 96;
+
+type ResizeEdge = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
 
 const FROM_LANGS: [string, string][] = [
     ["auto", "Auto"],
@@ -106,7 +107,31 @@ let lastStatus = "";
 let optimisticListen: boolean | null = null;
 let startInFlight = false;
 let specRaf = 0;
+let overlayAc: AbortController | null = null;
 const specBuf = new Float32Array(Engine.SPECTRUM_BARS);
+
+function parseResizeEdge(value: string | undefined): ResizeEdge | null {
+    switch (value) {
+        case "n":
+        case "s":
+        case "e":
+        case "w":
+        case "ne":
+        case "nw":
+        case "se":
+        case "sw":
+            return value;
+        default:
+            return null;
+    }
+}
+
+function resizeHandlesHtml() {
+    const edges: ResizeEdge[] = ["n", "s", "e", "w", "nw", "ne", "sw", "se"];
+    return edges.map(edge =>
+        `<div class="spyt-live-resize${edge === "se" ? " spyt-live-resize-grip" : ""}" data-edge="${edge}" title="Resize"></div>`
+    ).join("");
+}
 
 function optionsHtml(list: [string, string][], selected: string) {
     return list.map(([code, name]) =>
@@ -169,12 +194,14 @@ function paintSourceButtons() {
 
 function mount() {
     if (root) return;
-    if (settings.store.overlayWidth < MIN_W || settings.store.overlayWidth > 560)
+    if (!(settings.store.overlayWidth >= MIN_W))
         settings.store.overlayWidth = COMPACT_W;
-    if (settings.store.overlayHeight < COMPACT_H || settings.store.overlayHeight > 560)
-        settings.store.overlayHeight = settings.store.advancedOpen
-            ? COMPACT_H + ADVANCED_EXTRA_H
-            : COMPACT_H;
+    if (!(settings.store.overlayHeight >= MIN_H))
+        settings.store.overlayHeight = COMPACT_H;
+
+    overlayAc?.abort();
+    const ac = new AbortController();
+    overlayAc = ac;
 
     syncEngineLangs();
 
@@ -232,8 +259,8 @@ function mount() {
                 <span class="spyt-orig-kicker">Spoken</span>
                 <span class="spyt-orig-text"></span>
             </div>
-            <div class="spyt-live-resize" title="Drag to resize"></div>
         </div>
+        ${resizeHandlesHtml()}
     `;
     document.body.appendChild(root);
     applyPosition(settings.store.overlayX, settings.store.overlayY);
@@ -241,7 +268,8 @@ function mount() {
     wireDropdowns(root);
     paintSourceButtons();
     makeDraggable(root.querySelector(".spyt-live-bar") as HTMLElement, root);
-    makeResizable(root.querySelector(".spyt-live-resize") as HTMLElement, root);
+    makeResizable(root, ac.signal);
+    window.addEventListener("resize", keepOnScreen, { signal: ac.signal });
     wireSpokenHover(root);
     renderCaption(Engine.getSnapshot(), false);
     renderFeed(Engine.getSnapshot(), false);
@@ -257,6 +285,8 @@ function unmount() {
     if (timer != null) window.clearInterval(timer);
     timer = null;
     stopSpectrum();
+    overlayAc?.abort();
+    overlayAc = null;
     window.removeEventListener("pointerdown", onDocPointer);
     closeDropdowns();
     hideOrigTip();
@@ -380,11 +410,6 @@ function toggleAdvanced() {
     const open = !root.classList.contains("spyt-adv-open");
     root.classList.toggle("spyt-adv-open", open);
     settings.store.advancedOpen = open;
-    if (open) {
-        const rect = root.getBoundingClientRect();
-        applySize(rect.width, Math.max(rect.height, COMPACT_H + ADVANCED_EXTRA_H));
-        settings.store.overlayHeight = Math.round(root.getBoundingClientRect().height);
-    }
 }
 
 async function applyAudioSource(source: Engine.AudioSource) {
@@ -472,23 +497,32 @@ function listenToggle() {
 
 function applySize(width: number, height: number) {
     if (!root) return;
-    const w = Math.max(MIN_W, Math.min(window.innerWidth - 16, Math.round(width)));
-    const h = Math.max(MIN_H, Math.min(window.innerHeight - 16, Math.round(height)));
+    const collapsed = root.classList.contains("spyt-live-min");
+    const w = Math.max(MIN_W, Math.min(window.innerWidth - 12, Math.round(width)));
+    const h = Math.max(MIN_H, Math.min(window.innerHeight - 12, Math.round(height)));
     root.style.width = `${w}px`;
-    root.style.height = `${h}px`;
+    if (!collapsed) root.style.height = `${h}px`;
 }
 
 function applyPosition(x: number, y: number) {
     if (!root) return;
+    if (x < 0 || y < 0) return;
     const w = root.offsetWidth || MIN_W;
     const h = root.offsetHeight || MIN_H;
     const maxX = Math.max(0, window.innerWidth - w);
     const maxY = Math.max(0, window.innerHeight - h);
-    if (x < 0 || y < 0 || x > maxX + 48 || y > maxY + 48) return;
     root.style.left = `${Math.min(maxX, Math.max(0, Math.round(x)))}px`;
     root.style.top = `${Math.min(maxY, Math.max(0, Math.round(y)))}px`;
     root.style.right = "auto";
     root.style.bottom = "auto";
+}
+
+function keepOnScreen() {
+    if (!root) return;
+    const rect = root.getBoundingClientRect();
+    applySize(rect.width, rect.height);
+    if (root.style.left !== "" && root.style.top !== "")
+        applyPosition(rect.left, rect.top);
 }
 
 function setStatus(text: string) {
@@ -719,30 +753,107 @@ function makeDraggable(handle: HTMLElement, box: HTMLElement) {
     box.addEventListener("pointercancel", endDrag);
 }
 
-function makeResizable(handle: HTMLElement, box: HTMLElement) {
-    let sx = 0, sy = 0, sw = 0, sh = 0, down = false;
-    handle.addEventListener("pointerdown", e => {
+function makeResizable(box: HTMLElement, signal: AbortSignal) {
+    let sx = 0, sy = 0, sw = 0, sh = 0, sl = 0, st = 0;
+    let down = false;
+    let pid = -1;
+    let edge: ResizeEdge = "se";
+
+    const endResize = (e: PointerEvent) => {
+        if (!down || (pid >= 0 && e.pointerId !== pid)) return;
+        down = false;
+        pid = -1;
+        box.classList.remove("spyt-live-resizing");
+        try {
+            if (box.hasPointerCapture(e.pointerId))
+                box.releasePointerCapture(e.pointerId);
+        } catch { /* ignore */ }
+        if (!root) return;
+        settings.store.overlayWidth = Math.round(root.getBoundingClientRect().width);
+        if (!root.classList.contains("spyt-live-min"))
+            settings.store.overlayHeight = Math.round(root.getBoundingClientRect().height);
+        settings.store.overlayX = Math.round(root.getBoundingClientRect().left);
+        settings.store.overlayY = Math.round(root.getBoundingClientRect().top);
+    };
+
+    box.addEventListener("pointerdown", e => {
+        if (e.button !== 0) return;
+        const handle = (e.target as HTMLElement | null)?.closest?.(".spyt-live-resize") as HTMLElement | null;
+        if (!handle || !box.contains(handle)) return;
+        const next = parseResizeEdge(handle.dataset.edge);
+        if (!next) return;
         down = true;
+        edge = next;
+        pid = e.pointerId;
         sx = e.clientX;
         sy = e.clientY;
-        sw = box.getBoundingClientRect().width;
-        sh = box.getBoundingClientRect().height;
+        const rect = box.getBoundingClientRect();
+        sw = rect.width;
+        sh = rect.height;
+        sl = rect.left;
+        st = rect.top;
+        box.classList.add("spyt-live-resizing");
+        try { box.setPointerCapture(pid); } catch { /* ignore */ }
         e.preventDefault();
         e.stopPropagation();
     }, true);
-    window.addEventListener("pointerup", () => {
-        if (!down || !root) {
-            down = false;
-            return;
+
+    box.addEventListener("pointermove", e => {
+        if (!down || e.pointerId !== pid) return;
+        const dx = e.clientX - sx;
+        const dy = e.clientY - sy;
+        const maxW = window.innerWidth - 8;
+        const maxH = window.innerHeight - 8;
+        const right = sl + sw;
+        const bottom = st + sh;
+        const growE = edge === "e" || edge === "ne" || edge === "se";
+        const growW = edge === "w" || edge === "nw" || edge === "sw";
+        const growS = edge === "s" || edge === "se" || edge === "sw";
+        const growN = edge === "n" || edge === "ne" || edge === "nw";
+
+        let w = sw;
+        let h = sh;
+        let left = sl;
+        let top = st;
+        if (growE) w = sw + dx;
+        if (growW) w = sw - dx;
+        if (growS) h = sh + dy;
+        if (growN) h = sh - dy;
+
+        w = Math.max(MIN_W, Math.min(maxW, w));
+        h = Math.max(MIN_H, Math.min(maxH, h));
+
+        if (growW) {
+            left = right - w;
+            if (left < 0) {
+                left = 0;
+                w = Math.max(MIN_W, Math.min(maxW, right));
+            }
+        } else if (growE) {
+            w = Math.max(MIN_W, Math.min(w, window.innerWidth - left - 8));
         }
-        down = false;
-        settings.store.overlayWidth = Math.round(root.getBoundingClientRect().width);
-        settings.store.overlayHeight = Math.round(root.getBoundingClientRect().height);
-    });
-    window.addEventListener("pointermove", e => {
-        if (!down) return;
-        applySize(sw + e.clientX - sx, sh + e.clientY - sy);
-    });
+
+        if (growN) {
+            top = bottom - h;
+            if (top < 0) {
+                top = 0;
+                h = Math.max(MIN_H, Math.min(maxH, bottom));
+            }
+        } else if (growS) {
+            h = Math.max(MIN_H, Math.min(h, window.innerHeight - top - 8));
+        }
+
+        applySize(w, h);
+        box.style.left = `${Math.round(left)}px`;
+        box.style.top = `${Math.round(top)}px`;
+        box.style.right = "auto";
+        box.style.bottom = "auto";
+        e.preventDefault();
+        e.stopPropagation();
+    }, { signal });
+
+    box.addEventListener("pointerup", endResize, { signal });
+    box.addEventListener("pointercancel", endResize, { signal });
 }
 
 export default definePlugin({

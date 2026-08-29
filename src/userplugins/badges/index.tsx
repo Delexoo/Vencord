@@ -16,6 +16,7 @@ import type { CSSProperties } from "react";
 
 import { Delexo } from "../_delexo/author";
 import { createShareSync, patchOwnBio, refreshUserProfile, setOwnBadgeShare, startLiveShare, stopLiveShare } from "../_delexo/liveShare";
+import { publishBadgeShare, startShareRegistry, stopShareRegistry } from "../_delexo/shareRegistry";
 import {
     badgeIcon,
     CHOICE_GROUPS,
@@ -31,6 +32,7 @@ import {
 import { VENCORD_CONTRIBUTOR_ICON, VENCORD_CONTRIBUTOR_USER_ID } from "./render";
 import {
     decodeShare,
+    packState,
     shareHasAnything,
     stripShare,
     writeShare,
@@ -232,9 +234,12 @@ function currentShareState(): ShareState {
 async function syncShareToBio() {
     const state = currentShareState();
     setOwnBadgeShare(state);
+    const userId = ownId();
+    if (userId) {
+        void publishBadgeShare(userId, shareHasAnything(state) ? packState(state) : "");
+    }
     try {
         await patchOwnBio(bio => writeShare(bio, state));
-        const userId = ownId();
         if (!userId || !shareHasAnything(state)) return;
         const saved = UserProfileStore.getUserProfile(userId)?.bio;
         if (!decodeShare(saved)) {
@@ -579,6 +584,7 @@ export default definePlugin({
 
     start() {
         startLiveShare();
+        startShareRegistry();
         setOwnBadgeShare(currentShareState());
         scheduleShare();
     },
@@ -592,6 +598,7 @@ export default definePlugin({
 
     stop() {
         setOwnBadgeShare(null);
+        stopShareRegistry();
         stopLiveShare();
     }
 });

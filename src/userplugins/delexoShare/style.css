@@ -91,16 +91,27 @@
     height: 0 !important;
 }
 
-.vc-profile-button-share {
-    display: contents;
+:is(a, button, div, span):has(> .vc-profile-button-share),
+div:has(> .vc-profile-button-share),
+span:has(> .vc-profile-button-share) {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    height: 22px !important;
+    overflow: visible !important;
+    pointer-events: auto !important;
 }
 
-div:has(> .vc-profile-button-badge),
-div:has(> .vc-profile-button-share),
-span:has(> .vc-profile-button-badge),
-span:has(> .vc-profile-button-share) {
-    justify-content: flex-start !important;
-    text-align: left !important;
+.vc-profile-button-share {
+    display: inline-flex !important;
+    align-items: center;
+    gap: 2px;
+    width: max-content;
+    max-width: none;
+    vertical-align: middle;
 }
 
 .vc-profile-button-share-img {

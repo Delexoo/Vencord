@@ -212,9 +212,29 @@
 .vc-arp-pair {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
-    align-items: start;
+    align-items: stretch;
     gap: 0.5em;
     width: 100%;
+}
+
+.vc-arp-pair > * {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    height: 100%;
+}
+
+.vc-arp-pair .vc-plugins-setting-section {
+    flex: 1;
+    height: 100%;
+}
+
+.vc-arp-pair .vc-plugins-setting-content {
+    flex: 1;
+}
+
+.vc-arp-pair .vc-plugins-setting-content > :last-child {
+    margin-top: auto;
 }
 
 .vc-arp-single {

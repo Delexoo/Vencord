@@ -81,19 +81,30 @@ export function removeProfileBadge(badge: ProfileBadge) {
  * You probably don't need to use this.
  */
 export function _getBadges(args: BadgeUserArgs) {
+    const host = args as BadgeUserArgs & {
+        user_id?: string;
+        user?: { id?: string; };
+        bio?: string;
+        _userProfile?: { userId?: string; user_id?: string; bio?: string; };
+    };
+    const userId = String(host.userId || host.user_id || host.user?.id || host._userProfile?.userId || host._userProfile?.user_id || "");
+    const guildId = String(host.guildId || "");
+    const bio = host.bio ?? host._userProfile?.bio;
+    const base = { ...host, userId, guildId, bio };
+
     const badges = [] as ProfileBadge[];
     for (const badge of Badges) {
-        if (badge.shouldShow && !badge.shouldShow(args)) {
+        if (badge.shouldShow && !badge.shouldShow(base)) {
             continue;
         }
 
         const b = badge.getBadges
-            ? badge.getBadges(args).map(badge => ({
-                ...args,
+            ? badge.getBadges(base).map(badge => ({
+                ...base,
                 ...badge,
                 component: badge.component && ErrorBoundary.wrap(badge.component, { noop: true })
             }))
-            : [{ ...args, ...badge }];
+            : [{ ...base, ...badge }];
 
         if (badge.position === BadgePosition.START) {
             badges.unshift(...b);
@@ -102,7 +113,7 @@ export function _getBadges(args: BadgeUserArgs) {
         }
     }
 
-    const donorBadges = BadgeAPIPlugin.getDonorBadges(args.userId);
+    const donorBadges = BadgeAPIPlugin.getDonorBadges(userId || args.userId);
     if (donorBadges) {
         badges.unshift(
             ...donorBadges.map(badge => ({
@@ -118,4 +129,5 @@ export function _getBadges(args: BadgeUserArgs) {
 export interface BadgeUserArgs {
     userId: string;
     guildId: string;
+    bio?: string;
 }
