@@ -15,7 +15,7 @@ import { Button, Menu, Text, createRoot, useEffect, useState } from "@webpack/co
 import type { Root } from "react-dom/client";
 
 import { Delexo } from "../_delexo/author";
-import { mutationClassMatches, scheduleOnce } from "../_delexo/idle";
+import { scheduleOnce } from "../_delexo/idle";
 import { AdvancedNoteField, getNotesDirPath, listNotesCount, openAdvancedNoteModal, openNotesFolder } from "./NoteModal";
 import managedStyle from "./style.css?managed";
 
@@ -171,12 +171,10 @@ function findViewFullProfileButton(): HTMLElement | null {
     return null;
 }
 
-const PROFILE_UI_RE = /userProfile|userPopout|profilePanel|biteSize/;
 const placeNotes = scheduleOnce(150);
 
 let popoutHost: HTMLDivElement | null = null;
 let popoutRoot: Root | null = null;
-let popoutObserver: MutationObserver | null = null;
 
 function removePopoutButton() {
     popoutRoot?.unmount();
@@ -464,12 +462,6 @@ export default definePlugin({
         }
     ],
 
-    flux: {
-        USER_PROFILE_MODAL_OPEN() {
-            queueProfileNoteButton();
-        }
-    },
-
     AdvancedNoteField,
     ProfileNotesButton,
 
@@ -481,20 +473,23 @@ export default definePlugin({
             : button;
     }, { noop: true }),
 
+    flux: {
+        USER_PROFILE_MODAL_OPEN() {
+            queueProfileNoteButton();
+        },
+        USER_PROFILE_MODAL_CLOSE() {
+            removePopoutButton();
+            removeProfileNoteButton();
+        }
+    },
+
     start() {
         queuePopoutButton();
         queueProfileNoteButton();
-        popoutObserver = new MutationObserver(records => {
-            if (popoutHost || profileHost || mutationClassMatches(records, PROFILE_UI_RE))
-                queueProfileNoteButton();
-        });
-        popoutObserver.observe(document.body, { childList: true, subtree: true });
     },
 
     stop() {
         placeNotes.cancel();
-        popoutObserver?.disconnect();
-        popoutObserver = null;
         removePopoutButton();
         removeProfileNoteButton();
     }

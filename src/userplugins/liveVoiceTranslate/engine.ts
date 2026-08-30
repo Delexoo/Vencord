@@ -8,7 +8,7 @@ import * as DataStore from "@api/DataStore";
 import { PluginNative } from "@utils/types";
 
 import { googleTranslate } from "./translate";
-import { ensureWhisper, getWhisperLoadStatus, transcribePcm } from "./whisper";
+import { ensureWhisper, getWhisperLoadStatus, releaseWhisper, transcribePcm } from "./whisper";
 
 const Native = VencordNative.pluginHelpers.LiveVoiceTranslate as PluginNative<typeof import("./native")> | undefined;
 
@@ -38,13 +38,12 @@ export type EngineSnapshot = {
 
 export type AudioSource = "discord" | "system" | "mic";
 
-export const SPECTRUM_BARS = 32;
-
 const TARGET_SR = 16000;
-const SPEECH_RMS = 0.012;
-const SILENCE_MS = 700;
-const MIN_SPEECH_MS = 450;
+const SPEECH_RMS = 0.0022;
+const SILENCE_MS = 600;
+const MIN_SPEECH_MS = 550;
 const MAX_UTTER_MS = 8000;
+const PREROLL_CHUNKS = 4;
 
 let fromLang = "auto";
 let toLang = "en";
@@ -59,11 +58,14 @@ let lastTranslation = "";
 let partial = false;
 
 let audioCtx: AudioContext | null = null;
-let processor: ScriptProcessorNode | null = null;
-let analyser: AnalyserNode | null = null;
-let freqBytes: Uint8Array | null = null;
+let tapAnalyser: AnalyserNode | null = null;
+let tapBuf: Float32Array<ArrayBuffer> | null = null;
+let graphSrc: MediaStreamAudioSourceNode | null = null;
+let graphPreamp: GainNode | null = null;
+let graphSink: MediaStreamAudioDestinationNode | null = null;
 let activeStreams: MediaStream[] = [];
 let pcmBuf: Float32Array[] = [];
+let preroll: Float32Array[] = [];
 let speechStartedAt = 0;
 let lastLoudAt = 0;
 let inSpeech = false;
@@ -71,6 +73,10 @@ let busyTranscribe = false;
 let loopTimer: number | null = null;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let historyLoaded = false;
+let noiseRms = 0.003;
+let heardPeak = 0;
+let listenStartedAt = 0;
+let quietHinted = false;
 
 function setStatus(s: string) {
     status = s;
@@ -168,37 +174,6 @@ export function getAudioSource() {
     return audioSource;
 }
 
-export function fillSpectrum(out: Float32Array) {
-    const node = analyser;
-    const bins = freqBytes;
-    const ctx = audioCtx;
-    if (!listening || !node || !bins || !ctx) {
-        for (let i = 0; i < out.length; i++) out[i] *= 0.78;
-        return;
-    }
-    node.getByteFrequencyData(bins as Uint8Array);
-    const sr = ctx.sampleRate || TARGET_SR;
-    const binHz = sr / node.fftSize;
-    const minHz = 70;
-    const maxHz = Math.min(7000, sr * 0.48);
-    const n = bins.length;
-    for (let i = 0; i < out.length; i++) {
-        const t0 = i / out.length;
-        const t1 = (i + 1) / out.length;
-        const f0 = minHz * Math.pow(maxHz / minHz, t0);
-        const f1 = minHz * Math.pow(maxHz / minHz, t1);
-        let i0 = Math.floor(f0 / binHz);
-        let i1 = Math.ceil(f1 / binHz);
-        if (i0 < 1) i0 = 1;
-        if (i1 <= i0) i1 = i0 + 1;
-        if (i1 > n) i1 = n;
-        let sum = 0;
-        for (let b = i0; b < i1; b++) sum += bins[b];
-        const shaped = Math.pow(sum / ((i1 - i0) * 255), 0.7);
-        out[i] = out[i] * 0.36 + shaped * 0.64;
-    }
-}
-
 export function getSnapshot(): EngineSnapshot {
     return {
         ready,
@@ -229,16 +204,23 @@ function stopTracks() {
         }
     }
     activeStreams = [];
-    try { processor?.disconnect(); } catch { /* ignore */ }
-    processor = null;
-    try { analyser?.disconnect(); } catch { /* ignore */ }
-    analyser = null;
-    freqBytes = null;
+    try { graphSrc?.disconnect(); } catch { /* ignore */ }
+    graphSrc = null;
+    try { graphPreamp?.disconnect(); } catch { /* ignore */ }
+    graphPreamp = null;
+    try { tapAnalyser?.disconnect(); } catch { /* ignore */ }
+    tapAnalyser = null;
+    tapBuf = null;
+    graphSink = null;
     try { void audioCtx?.close(); } catch { /* ignore */ }
     audioCtx = null;
     pcmBuf = [];
+    preroll = [];
     inSpeech = false;
     level = 0;
+    noiseRms = 0.003;
+    heardPeak = 0;
+    quietHinted = false;
 }
 
 function mergePcm(chunks: Float32Array[]) {
@@ -254,15 +236,61 @@ function mergePcm(chunks: Float32Array[]) {
 }
 
 function downsampleTo16k(input: Float32Array, inputRate: number) {
-    if (inputRate === TARGET_SR) return input;
+    if (Math.abs(inputRate - TARGET_SR) < 1) return input;
     const ratio = inputRate / TARGET_SR;
     const outLen = Math.max(1, Math.floor(input.length / ratio));
     const out = new Float32Array(outLen);
+    const last = input.length - 1;
     for (let i = 0; i < outLen; i++) {
-        const idx = Math.floor(i * ratio);
-        out[i] = input[idx] ?? 0;
+        const src = i * ratio;
+        const i0 = Math.min(last, Math.floor(src));
+        const i1 = Math.min(last, i0 + 1);
+        const t = src - i0;
+        out[i] = (input[i0] ?? 0) * (1 - t) + (input[i1] ?? 0) * t;
     }
     return out;
+}
+
+function normalizePcm(samples: Float32Array) {
+    let peak = 0;
+    for (let i = 0; i < samples.length; i++) {
+        const a = Math.abs(samples[i]);
+        if (a > peak) peak = a;
+    }
+    if (peak < 0.0006) return samples;
+    const gain = Math.min(18, 0.72 / peak);
+    if (gain < 1.05) return samples;
+    const out = new Float32Array(samples.length);
+    for (let i = 0; i < samples.length; i++)
+        out[i] = Math.max(-1, Math.min(1, samples[i] * gain));
+    return out;
+}
+
+function attachCaptureGraph(stream: MediaStream) {
+    if (!audioCtx) throw new Error("Audio is not ready");
+    try { graphSrc?.disconnect(); } catch { /* ignore */ }
+    try { graphPreamp?.disconnect(); } catch { /* ignore */ }
+    try { tapAnalyser?.disconnect(); } catch { /* ignore */ }
+
+    for (const s of activeStreams) {
+        if (s === stream) continue;
+        for (const t of s.getTracks()) {
+            try { t.stop(); } catch { /* ignore */ }
+        }
+    }
+    activeStreams = [stream];
+
+    graphSrc = audioCtx.createMediaStreamSource(stream);
+    graphPreamp = audioCtx.createGain();
+    graphPreamp.gain.value = audioSource === "mic" ? 2.2 : 5;
+    tapAnalyser = audioCtx.createAnalyser();
+    tapAnalyser.fftSize = 2048;
+    tapAnalyser.smoothingTimeConstant = 0;
+    tapBuf = new Float32Array(tapAnalyser.fftSize);
+    graphSink = audioCtx.createMediaStreamDestination();
+    graphSrc.connect(graphPreamp);
+    graphPreamp.connect(tapAnalyser);
+    graphPreamp.connect(graphSink);
 }
 
 type DesktopSource = {
@@ -344,11 +372,14 @@ async function getCaptureStream(source: AudioSource): Promise<{ stream: MediaStr
                     ),
                     label: "Discord"
                 };
-            } catch (e) {
-                const msg = String(e).replace(/^Error:\s*/, "");
-                if (/no audio/i.test(msg))
-                    throw new Error("Discord window has no audio. Use System audio to hear the call.");
-                throw e instanceof Error ? e : new Error(msg);
+            } catch {
+                return {
+                    stream: await captureDesktop(
+                        s => Boolean(s.isScreen),
+                        "No Discord or system audio source found."
+                    ),
+                    label: "System audio"
+                };
             }
         case "system":
             return {
@@ -366,10 +397,7 @@ async function getCaptureStream(source: AudioSource): Promise<{ stream: MediaStr
 }
 
 async function flushUtterance() {
-    if (busyTranscribe || !pcmBuf.length) {
-        pcmBuf = [];
-        return;
-    }
+    if (busyTranscribe || !pcmBuf.length) return;
     const chunks = pcmBuf;
     pcmBuf = [];
     inSpeech = false;
@@ -377,7 +405,7 @@ async function flushUtterance() {
     partial = true;
     setStatus("Transcribing…");
     try {
-        const merged = mergePcm(chunks);
+        const merged = normalizePcm(mergePcm(chunks));
         const rate = audioCtx?.sampleRate || TARGET_SR;
         const pcm16 = downsampleTo16k(merged, rate);
         const heard = await transcribePcm(pcm16, TARGET_SR, fromLang);
@@ -423,28 +451,39 @@ function listenStatus() {
     }
 }
 
-function onAudioProcess(ev: AudioProcessingEvent) {
+function onPcmFrame(input: Float32Array) {
     if (!listening) return;
-    const input = ev.inputBuffer.getChannelData(0);
     let sum = 0;
     for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
     const rms = Math.sqrt(sum / Math.max(1, input.length));
     level = rms;
+    heardPeak = Math.max(heardPeak, rms);
+
+    if (!inSpeech) {
+        noiseRms = noiseRms * 0.96 + rms * 0.04;
+        preroll.push(new Float32Array(input));
+        if (preroll.length > PREROLL_CHUNKS) preroll.shift();
+    }
 
     const now = Date.now();
-    const loud = rms >= SPEECH_RMS;
+    const gate = Math.max(SPEECH_RMS, noiseRms * 2.2);
+    const loud = rms >= gate;
 
     if (loud) {
         lastLoudAt = now;
         if (!inSpeech) {
             inSpeech = true;
             speechStartedAt = now;
-            pcmBuf = [];
+            pcmBuf = preroll.slice();
+            preroll = [];
+        } else {
+            pcmBuf.push(new Float32Array(input));
         }
+    } else if (inSpeech) {
+        pcmBuf.push(new Float32Array(input));
     }
 
     if (inSpeech) {
-        pcmBuf.push(new Float32Array(input));
         const elapsed = now - speechStartedAt;
         const silentFor = now - lastLoudAt;
         if (elapsed >= MAX_UTTER_MS || (silentFor >= SILENCE_MS && elapsed >= MIN_SPEECH_MS))
@@ -452,17 +491,22 @@ function onAudioProcess(ev: AudioProcessingEvent) {
     }
 }
 
+function pumpCapture() {
+    if (!listening || !tapAnalyser || !tapBuf) return;
+    tapAnalyser.getFloatTimeDomainData(tapBuf as Float32Array<ArrayBuffer>);
+    onPcmFrame(tapBuf);
+}
+
 export async function startListening() {
     if (listening) return;
 
     setStatus("Loading model…");
     listening = true;
+    heardPeak = 0;
+    quietHinted = false;
+    listenStartedAt = Date.now();
     try {
-        try {
-            audioCtx = new AudioContext({ sampleRate: TARGET_SR });
-        } catch {
-            audioCtx = new AudioContext();
-        }
+        audioCtx = new AudioContext();
         try { await audioCtx.resume(); } catch { /* ignore */ }
 
         await ensureWhisper();
@@ -472,30 +516,41 @@ export async function startListening() {
         }
         setStatus("Starting capture…");
         const captured = await getCaptureStream(audioSource);
-        activeStreams = [captured.stream];
-        const src = audioCtx.createMediaStreamSource(captured.stream);
-        analyser = audioCtx.createAnalyser();
-        analyser.fftSize = 512;
-        analyser.smoothingTimeConstant = 0.5;
-        analyser.minDecibels = -88;
-        analyser.maxDecibels = -20;
-        freqBytes = new Uint8Array(analyser.frequencyBinCount);
-        processor = audioCtx.createScriptProcessor(4096, 1, 1);
-        processor.onaudioprocess = onAudioProcess;
-        const mute = audioCtx.createGain();
-        mute.gain.value = 0;
-        src.connect(analyser);
-        src.connect(processor);
-        processor.connect(mute);
-        mute.connect(audioCtx.destination);
+        if (captured.label.startsWith("System") && audioSource === "discord") {
+            audioSource = "system";
+            setStatus("Using System audio");
+        }
+        attachCaptureGraph(captured.stream);
 
         setStatus(listenStatus());
         if (loopTimer != null) window.clearInterval(loopTimer);
+        const hop = Math.max(80, Math.round((tapAnalyser?.fftSize || 2048) / (audioCtx.sampleRate || TARGET_SR) * 1000));
         loopTimer = window.setInterval(() => {
             if (!listening) return;
+            if (audioCtx?.state === "suspended")
+                void audioCtx.resume();
+            pumpCapture();
+            if (!quietHinted && Date.now() - listenStartedAt > 2500 && heardPeak < 0.001) {
+                quietHinted = true;
+                if (audioSource === "discord") {
+                    audioSource = "system";
+                    void (async () => {
+                        try {
+                            setStatus("Switching to System audio…");
+                            const next = await getCaptureStream("system");
+                            attachCaptureGraph(next.stream);
+                            setStatus(listenStatus());
+                        } catch {
+                            setStatus("No speech heard — try Mic in Advanced");
+                        }
+                    })();
+                } else {
+                    setStatus("No speech heard — try another source in Advanced");
+                }
+            }
             if (inSpeech && Date.now() - lastLoudAt >= SILENCE_MS && Date.now() - speechStartedAt >= MIN_SPEECH_MS)
                 void flushUtterance();
-        }, 200);
+        }, hop);
     } catch (e) {
         listening = false;
         stopTracks();
@@ -505,7 +560,7 @@ export async function startListening() {
     }
 }
 
-export async function stopListening() {
+export async function stopListening(keepModel = false) {
     listening = false;
     if (loopTimer != null) {
         window.clearInterval(loopTimer);
@@ -513,6 +568,12 @@ export async function stopListening() {
     }
     if (inSpeech && pcmBuf.length) await flushUtterance();
     stopTracks();
+    if (!keepModel) {
+        ready = false;
+        await releaseWhisper();
+        setStatus("Off");
+        return;
+    }
     setStatus(ready ? "Ready" : "Off");
 }
 

@@ -20,16 +20,17 @@ import { publishBadgeShare, startShareRegistry, stopShareRegistry } from "../_de
 import {
     badgeIcon,
     CHOICE_GROUPS,
+    CONTRIBUTOR_BADGE,
     findChoiceOption,
     HELP_ARTICLE,
     SECTION_LABELS,
     SECTIONS,
     TOGGLE_BADGES,
+    VENCORD_CONTRIBUTOR_ICON,
     type BadgeOption,
     type BadgeSection,
     type ChoiceGroup,
 } from "./catalog";
-import { VENCORD_CONTRIBUTOR_ICON, VENCORD_CONTRIBUTOR_USER_ID } from "./render";
 import {
     decodeShare,
     packState,
@@ -225,7 +226,7 @@ function currentShareState(): ShareState {
     const toggles: Record<string, boolean> = {};
     for (const badge of TOGGLE_BADGES) toggles[badge.id] = toggleOn(badge.id);
     return {
-        contributor: ownId() === VENCORD_CONTRIBUTOR_USER_ID && contributorOn(),
+        contributor: contributorOn(),
         choices,
         toggles,
     };
@@ -484,7 +485,10 @@ function ToggleRow({ badge }: { badge: typeof TOGGLE_BADGES[number]; }) {
 
 function Section({ id }: { id: BadgeSection; }) {
     const groups = CHOICE_GROUPS.filter(group => group.section === id);
-    const toggles = TOGGLE_BADGES.filter(badge => badge.section === id);
+    const toggles = [
+        ...(id === CONTRIBUTOR_BADGE.section ? [CONTRIBUTOR_BADGE] : []),
+        ...TOGGLE_BADGES.filter(badge => badge.section === id)
+    ];
     if (!groups.length && !toggles.length) return null;
     return (
         <div className={cl("section")}>
@@ -512,9 +516,8 @@ function SettingsPanel() {
     const mine = (profile?.badges ?? []).filter(badge => badge && (badge.icon || (badge as { iconSrc?: string; }).iconSrc));
     const seen = new Set(mine.map(badge => badge.id));
     const extras = extra.filter(badge => !seen.has(badge.discordId));
-    const showContributor = contributorOn() && me?.id === VENCORD_CONTRIBUTOR_USER_ID;
     const preview: PreviewBadge[] = [];
-    if (showContributor) {
+    if (contributorOn()) {
         preview.push({ key: "contributor", src: VENCORD_CONTRIBUTOR_ICON, title: "Vencord Contributor" });
     }
     for (const badge of mine) {
@@ -548,23 +551,6 @@ function SettingsPanel() {
             </div>
             <div className={cl("hint")}>
                 Client-side badges from <Link href={HELP_ARTICLE}>Profile Badges 101</Link>. Anyone with Vencord installed can see them. Changes show up in about a second while a profile is open.
-            </div>
-
-            <div className={cl("section")}>
-                <Heading tag="h3" className={cl("section-title")}>Delexo</Heading>
-                <div className={cl("row")}>
-                    <img className={cl("icon")} src={VENCORD_CONTRIBUTOR_ICON} alt="" />
-                    <FormSwitch
-                        title="Vencord Contributor"
-                        description={`Official Vencord contributor badge on Discord ID ${VENCORD_CONTRIBUTOR_USER_ID}.`}
-                        value={contributorOn()}
-                        hideBorder
-                        onChange={on => {
-                            settings.store.vencordContributor = on;
-                            scheduleShare();
-                        }}
-                    />
-                </div>
             </div>
 
             {SECTIONS.map(id => <Section key={id} id={id} />)}

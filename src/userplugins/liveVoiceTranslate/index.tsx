@@ -11,10 +11,10 @@ import definePlugin, { OptionType } from "@utils/types";
 import * as Engine from "./engine";
 import managedStyle from "./style.css?managed";
 
-const MIN_W = 176;
-const MIN_H = 110;
-const COMPACT_W = 292;
-const COMPACT_H = 268;
+const MIN_W = 148;
+const MIN_H = 92;
+const COMPACT_W = 220;
+const COMPACT_H = 248;
 
 type ResizeEdge = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
 
@@ -52,6 +52,15 @@ const settings = definePluginSettings({
         type: OptionType.BOOLEAN,
         description: "Keep listening after Listen is pressed",
         default: false
+    },
+    showOverlay: {
+        type: OptionType.BOOLEAN,
+        description: "Show the Live Translate window",
+        default: true,
+        onChange(v: boolean) {
+            if (v) mount();
+            else unmount();
+        }
     },
     fromLang: {
         type: OptionType.STRING,
@@ -106,9 +115,8 @@ let lastPaint = "";
 let lastStatus = "";
 let optimisticListen: boolean | null = null;
 let startInFlight = false;
-let specRaf = 0;
 let overlayAc: AbortController | null = null;
-const specBuf = new Float32Array(Engine.SPECTRUM_BARS);
+let specIdle = false;
 
 function parseResizeEdge(value: string | undefined): ResizeEdge | null {
     switch (value) {
@@ -194,6 +202,13 @@ function paintSourceButtons() {
 
 function mount() {
     if (root) return;
+    if (
+        (settings.store.overlayWidth === 292 && settings.store.overlayHeight === 268)
+        || (settings.store.overlayWidth === 220 && settings.store.overlayHeight === 202)
+    ) {
+        settings.store.overlayWidth = COMPACT_W;
+        settings.store.overlayHeight = COMPACT_H;
+    }
     if (!(settings.store.overlayWidth >= MIN_W))
         settings.store.overlayWidth = COMPACT_W;
     if (!(settings.store.overlayHeight >= MIN_H))
@@ -271,20 +286,28 @@ function mount() {
     makeResizable(root, ac.signal);
     window.addEventListener("resize", keepOnScreen, { signal: ac.signal });
     wireSpokenHover(root);
-    renderCaption(Engine.getSnapshot(), false);
+    renderCaption(Engine.getSnapshot(), false, false);
     renderFeed(Engine.getSnapshot(), false);
-    startSpectrum();
     poll();
-    timer = window.setInterval(poll, 180);
 
     if (settings.store.autoListen)
         void startListen();
 }
 
-function unmount() {
+function startUiLoop() {
+    if (timer != null) return;
+    poll();
+    timer = window.setInterval(poll, 400);
+}
+
+function stopUiLoop() {
     if (timer != null) window.clearInterval(timer);
     timer = null;
-    stopSpectrum();
+    poll();
+}
+
+function unmount() {
+    stopUiLoop();
     overlayAc?.abort();
     overlayAc = null;
     window.removeEventListener("pointerdown", onDocPointer);
@@ -297,6 +320,7 @@ function unmount() {
     lastStatus = "";
     optimisticListen = null;
     startInFlight = false;
+    specIdle = false;
 }
 
 function closeDropdowns() {
@@ -420,13 +444,15 @@ async function applyAudioSource(source: Engine.AudioSource) {
     if (!wasListening) return;
     setStatus("Switching source…");
     try {
-        await Engine.stopListening();
+        await Engine.stopListening(true);
         await Engine.startListening();
         setListenLook(true, "Stop");
+        startUiLoop();
     } catch (e) {
         optimisticListen = false;
         settings.store.autoListen = false;
         setListenLook(false, "Listen");
+        stopUiLoop();
         setStatus(String(e).replace(/^Error:\s*/, "").slice(0, 100));
     }
 }
@@ -449,7 +475,7 @@ function clearNow() {
     lastPaint = "cleared";
     root.classList.remove("spyt-has-text", "spyt-has-feed");
     const data = Engine.getSnapshot();
-    renderCaption(data, false);
+    renderCaption(data, false, false);
     renderFeed(data, false);
 }
 
@@ -471,10 +497,12 @@ async function startListen() {
     try {
         await Engine.startListening();
         setListenLook(true, "Stop");
+        startUiLoop();
     } catch (e) {
         optimisticListen = false;
         settings.store.autoListen = false;
         setListenLook(false, "Listen");
+        stopUiLoop();
         setStatus(String(e).replace(/^Error:\s*/, "").slice(0, 100));
     } finally {
         startInFlight = false;
@@ -486,6 +514,7 @@ async function stopListen() {
     settings.store.autoListen = false;
     setListenLook(false, "Listen");
     setStatus("Stopped");
+    stopUiLoop();
     await Engine.stopListening();
 }
 
@@ -531,35 +560,20 @@ function setStatus(text: string) {
     (root.querySelector(".spyt-live-status") as HTMLElement).textContent = text;
 }
 
-function stopSpectrum() {
-    if (specRaf) {
-        cancelAnimationFrame(specRaf);
-        specRaf = 0;
-    }
-}
-
-function paintSpectrum() {
+function paintSpectrum(level: number, live: boolean) {
     if (!root) return;
-    Engine.fillSpectrum(specBuf);
-    const live = Engine.isListening() || Boolean(optimisticListen);
-    const bars = root.querySelectorAll(".spyt-live-dot i");
-    const group = Math.max(1, Math.floor(specBuf.length / Math.max(1, bars.length)));
-    for (let i = 0; i < bars.length; i++) {
-        let peak = 0;
-        const start = i * group;
-        const end = i === bars.length - 1 ? specBuf.length : start + group;
-        for (let b = start; b < end; b++) peak = Math.max(peak, specBuf[b] || 0);
-        (bars[i] as HTMLElement).style.transform = `scaleY(${live ? 0.18 + Math.min(1, peak) * 0.82 : 0.28})`;
+    if (!live) {
+        if (specIdle) return;
+        specIdle = true;
+    } else {
+        specIdle = false;
     }
-}
-
-function startSpectrum() {
-    stopSpectrum();
-    const tick = () => {
-        specRaf = requestAnimationFrame(tick);
-        paintSpectrum();
-    };
-    specRaf = requestAnimationFrame(tick);
+    const v = live ? Math.min(1, level * 18) : 0;
+    const bars = root.querySelectorAll(".spyt-live-dot i");
+    for (let i = 0; i < bars.length; i++) {
+        const wobble = live ? 0.55 + ((i % 3) * 0.15) : 0.28;
+        (bars[i] as HTMLElement).style.transform = `scaleY(${live ? 0.18 + v * wobble * 0.82 : 0.28})`;
+    }
 }
 
 function hideOrigTip() {
@@ -615,7 +629,7 @@ function historyRows(data: Engine.EngineSnapshot): Engine.HistoryRow[] {
     return rows.slice(-12);
 }
 
-function renderCaption(data: Engine.EngineSnapshot, listening: boolean) {
+function renderCaption(data: Engine.EngineSnapshot, listening: boolean, hearing: boolean) {
     if (!root) return;
     const cap = root.querySelector(".spyt-caption") as HTMLElement | null;
     const en = cap?.querySelector(".spyt-caption-en") as HTMLElement | null;
@@ -625,11 +639,15 @@ function renderCaption(data: Engine.EngineSnapshot, listening: boolean) {
     const translated = (data.translation || data.original || "").trim();
     if (!translated) {
         cap.classList.add("is-empty");
-        cap.classList.toggle("spyt-live", false);
+        cap.classList.toggle("spyt-live", Boolean(data.partial || (listening && hearing)));
         delete cap.dataset.spoken;
-        en.textContent = listening
-            ? "Listening… speech will show up here"
-            : "Press Listen — translations appear here";
+        en.textContent = data.partial
+            ? "Transcribing…"
+            : listening && hearing
+                ? "Hearing…"
+                : listening
+                    ? "Listening… speech will show up here"
+                    : "Press Listen — translations appear here";
         return;
     }
 
@@ -670,7 +688,7 @@ function poll() {
     if (!root) return;
     const data = Engine.getSnapshot();
     const listening = data.listening || Boolean(optimisticListen);
-    const hearing = Number(data.level || 0) >= 0.01;
+    const hearing = Number(data.level || 0) >= 0.002;
 
     if (!startInFlight) {
         root.classList.toggle("spyt-on", listening);
@@ -682,19 +700,21 @@ function poll() {
     root.classList.toggle("spyt-idle", listening && !hearing);
     root.classList.toggle("spyt-has-text", Boolean((data.translation || data.original || "").trim()));
 
+    const src = Engine.getAudioSource();
+    if (src !== currentSource()) {
+        settings.store.audioSource = src;
+        paintSourceButtons();
+    }
+
     if (data.status) setStatus(data.status);
+    paintSpectrum(data.level, listening);
 
     const rows = historyRows(data);
-    const paint = JSON.stringify({
-        rows,
-        listening,
-        partial: data.partial,
-        original: data.original,
-        translation: data.translation
-    });
+    const latest = rows[rows.length - 1];
+    const paint = `${listening}|${hearing}|${data.partial}|${rows.length}|${latest?.original ?? ""}|${latest?.translation ?? ""}|${data.original}|${data.translation}`;
     if (paint === lastPaint) return;
     lastPaint = paint;
-    renderCaption(data, listening);
+    renderCaption(data, listening, hearing);
     renderFeed(data, listening);
 }
 
@@ -866,7 +886,7 @@ export default definePlugin({
     managedStyle,
     async start() {
         await Engine.loadPersistedHistory();
-        mount();
+        if (settings.store.showOverlay) mount();
     },
     async stop() {
         await Engine.savePersistedHistoryNow();

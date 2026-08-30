@@ -12,7 +12,7 @@ import { getOwnBadgeShare, getOwnButtonShare, setOwnBadgeShare, setOwnButtonShar
 
 const Native = VencordNative.pluginHelpers.DelexoShare as PluginNative<typeof import("../delexoShare/native")> | undefined;
 const RAW_URL = "https://raw.githubusercontent.com/Delexoo/Vencord/main/src/userplugins/_delexo/shareRegistry.json";
-const POLL_MS = 20000;
+const REFRESH_MIN_MS = 10 * 60 * 1000;
 
 type Registry = {
     badges: Record<string, string>;
@@ -20,8 +20,8 @@ type Registry = {
 };
 
 let cache: Registry = { badges: {}, buttons: {} };
-let pollTimer: ReturnType<typeof setInterval> | null = null;
 let refs = 0;
+let lastFetchAt = 0;
 
 function bump() {
     setOwnBadgeShare(getOwnBadgeShare());
@@ -73,7 +73,9 @@ async function loadFromGithub() {
     return true;
 }
 
-export async function refreshShareRegistry() {
+export async function refreshShareRegistry(force = false) {
+    if (!force && lastFetchAt && Date.now() - lastFetchAt < REFRESH_MIN_MS) return;
+    lastFetchAt = Date.now();
     try {
         await loadFromGithub();
     } catch {
@@ -84,17 +86,11 @@ export async function refreshShareRegistry() {
 export function startShareRegistry() {
     refs++;
     if (refs > 1) return;
-    void refreshShareRegistry();
-    if (!pollTimer) pollTimer = setInterval(() => void refreshShareRegistry(), POLL_MS);
+    void refreshShareRegistry(true);
 }
 
 export function stopShareRegistry() {
     refs = Math.max(0, refs - 1);
-    if (refs > 0) return;
-    if (pollTimer) {
-        clearInterval(pollTimer);
-        pollTimer = null;
-    }
 }
 
 export function registryBadgeShare(userId: string): ShareState | null {

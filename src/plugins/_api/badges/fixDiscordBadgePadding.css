@@ -1,5 +1,13 @@
-/* the profile popout badge container(s) */
-[class*="profile"] [class*="tags"] [class*="container"] {
-    /* Discord has gap set to 2px instead of 1px, which causes the 12th badge to wrap to a new line. */
-    gap: 1px;
+/* Original Discord badge row: left-aligned, wrap to the next line. */
+[class*="badgeList"],
+[class*="profileBadges"],
+[class*="userBadges"] {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    justify-content: flex-start !important;
+    align-items: center !important;
+    align-content: flex-start !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
 }

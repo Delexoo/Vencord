@@ -5,7 +5,10 @@
  */
 
 type AsrResult = { text?: string; language?: string; };
-type AsrPipeline = (audio: { raw: Float32Array; sampling_rate: number; }, opts?: Record<string, unknown>) => Promise<AsrResult | AsrResult[]>;
+type AsrPipeline = (
+    audio: Float32Array | { raw: Float32Array; sampling_rate: number; },
+    opts?: Record<string, unknown>
+) => Promise<AsrResult | AsrResult[]>;
 
 let pipelinePromise: Promise<AsrPipeline> | null = null;
 let loadStatus = "idle";
@@ -55,6 +58,17 @@ export async function ensureWhisper() {
     return pipelinePromise;
 }
 
+export async function releaseWhisper() {
+    const pending = pipelinePromise;
+    pipelinePromise = null;
+    loadStatus = "idle";
+    if (!pending) return;
+    try {
+        const asr: any = await pending;
+        if (typeof asr?.dispose === "function") await asr.dispose();
+    } catch { /* ignore */ }
+}
+
 /** Map UI codes to Whisper language codes where needed. */
 function whisperLang(code: string | undefined) {
     if (!code || code === "auto") return undefined;
@@ -71,17 +85,38 @@ export async function transcribePcm(
     if (!samples.length) return { text: "" };
     const asr = await ensureWhisper();
     const lang = whisperLang(language);
-    const result = await asr(
-        { raw: samples, sampling_rate: sampleRate },
-        {
-            chunk_length_s: 20,
-            stride_length_s: 3,
-            return_timestamps: false,
-            ...(lang ? { language: lang, task: "transcribe" } : { task: "transcribe" })
-        }
-    );
-    const rows = Array.isArray(result) ? result : [result];
-    const text = rows.map(r => r.text || "").join(" ").trim();
-    const detected = rows.find(r => r.language)?.language;
-    return { text, language: detected };
+    const minSamples = sampleRate;
+    const audio = samples.length >= minSamples ? samples : new Float32Array(minSamples);
+    if (audio !== samples) audio.set(samples);
+    const secs = audio.length / sampleRate;
+    const opts: Record<string, unknown> = {
+        return_timestamps: false,
+        task: "transcribe"
+    };
+    if (lang) opts.language = lang;
+    if (secs > 12) {
+        opts.chunk_length_s = 20;
+        opts.stride_length_s = 3;
+    }
+
+    const parse = (result: AsrResult | AsrResult[]) => {
+        const rows = Array.isArray(result) ? result : [result];
+        const text = rows
+            .map(r => String(r?.text || ""))
+            .join(" ")
+            .replace(/\[(?:blank_audio|silence|music|noise|inaudible)\]/gi, " ")
+            .replace(/\((?:blank_audio|silence|music|noise)\)/gi, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+        const detected = rows.find(r => r?.language)?.language;
+        return { text, language: detected };
+    };
+
+    try {
+        const first = parse(await asr(audio, { ...opts, sampling_rate: sampleRate }));
+        if (first.text) return first;
+        return parse(await asr({ raw: audio, sampling_rate: sampleRate }, opts));
+    } catch {
+        return parse(await asr({ raw: audio, sampling_rate: sampleRate }, opts));
+    }
 }

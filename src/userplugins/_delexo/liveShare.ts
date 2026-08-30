@@ -10,18 +10,15 @@ import type { ShareState } from "../badges/share";
 import type { ButtonShare } from "../profileButton/share";
 
 const WRITE_MS = 150;
-const POLL_MS = 5000;
-const FETCH_MIN_MS = 15000;
-const SCAN_MS = 200;
+const POLL_MS = 15000;
+const FETCH_MIN_MS = 30000;
 let bioWriteChain: Promise<void> = Promise.resolve();
-const PROFILE_OPEN_RE = /userProfileModal|userProfileOuter|userPopoutOuter|profilePanel|biteSize/;
 
 const lastFetchAt = new Map<string, number>();
 const inFlight = new Map<string, Promise<ReturnType<typeof UserProfileStore.getUserProfile>>>();
 let visibleIds = new Set<string>();
 let refs = 0;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
-let openObserver: MutationObserver | null = null;
 let bioObserver: MutationObserver | null = null;
 
 function profileRoots() {
@@ -55,7 +52,6 @@ function findUserIdNear(el: Element | null): string | null {
 }
 
 let hideTimer = 0;
-let scanTimer = 0;
 
 function visibleShareText(text: string) {
     let out = "";
@@ -262,31 +258,6 @@ function onDiscordProfileSuccess(event: { userProfile?: { user?: { id?: string; 
     scheduleHideGhostBios();
 }
 
-function scheduleScan() {
-    if (scanTimer) return;
-    scanTimer = window.setTimeout(() => {
-        scanTimer = 0;
-        scanOpenProfiles();
-    }, SCAN_MS);
-}
-
-function onProfileMutation(records: MutationRecord[]) {
-    for (const rec of records) {
-        for (const node of rec.addedNodes) {
-            if (node instanceof HTMLElement && PROFILE_OPEN_RE.test(node.className)) {
-                scheduleScan();
-                return;
-            }
-        }
-        for (const node of rec.removedNodes) {
-            if (node instanceof HTMLElement && PROFILE_OPEN_RE.test(node.className)) {
-                scheduleScan();
-                return;
-            }
-        }
-    }
-}
-
 export function noteOpenProfile(userId: string | null | undefined) {
     if (!userId) return;
     const id = String(userId);
@@ -389,8 +360,6 @@ export function startLiveShare() {
     FluxDispatcher.subscribe("USER_PROFILE_MODAL_OPEN", onModalOpen);
     FluxDispatcher.subscribe("USER_PROFILE_FETCH_SUCCESS", onDiscordProfileSuccess);
     scanOpenProfiles();
-    openObserver = new MutationObserver(onProfileMutation);
-    openObserver.observe(document.body, { childList: true, subtree: true });
 }
 
 export function stopLiveShare() {
@@ -398,12 +367,6 @@ export function stopLiveShare() {
     if (refs > 0) return;
     FluxDispatcher.unsubscribe("USER_PROFILE_MODAL_OPEN", onModalOpen);
     FluxDispatcher.unsubscribe("USER_PROFILE_FETCH_SUCCESS", onDiscordProfileSuccess);
-    openObserver?.disconnect();
-    openObserver = null;
-    if (scanTimer) {
-        clearTimeout(scanTimer);
-        scanTimer = 0;
-    }
     if (hideTimer) clearTimeout(hideTimer);
     hideTimer = 0;
     bioObserver?.disconnect();

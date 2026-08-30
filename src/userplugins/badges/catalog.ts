@@ -16,6 +16,7 @@ export const HELP_ARTICLE = "https://support.discord.com/hc/en-us/articles/36003
 
 /** Hosted in this repo so the plugin downloads the icon from GitHub. */
 export const VERIFIED_BADGE_URL = "https://raw.githubusercontent.com/Delexoo/Vencord/main/src/userplugins/badges/assets/VerificationBadge.png";
+export const VENCORD_CONTRIBUTOR_ICON = "https://cdn.discordapp.com/emojis/1092089799109775453.png?size=64";
 
 export type BadgeSection = "common" | "rare" | "legacy" | "experiment" | "unobtainable";
 
@@ -294,9 +295,18 @@ export const TOGGLE_BADGES: ToggleBadge[] = [
         name: "Verified",
         description: "Verified",
         hash: VERIFIED_BADGE_URL,
-        section: "common"
+        section: "unobtainable"
     },
 ];
+
+export const CONTRIBUTOR_BADGE: ToggleBadge = {
+    id: "vencordContributor",
+    discordId: "vencord_contributor",
+    name: "Vencord Contributor",
+    description: "Official Vencord contributor badge.",
+    hash: VENCORD_CONTRIBUTOR_ICON,
+    section: "rare"
+};
 
 export const SECTIONS: BadgeSection[] = ["common", "rare", "legacy", "experiment", "unobtainable"];
 

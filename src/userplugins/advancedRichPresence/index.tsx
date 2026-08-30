@@ -27,6 +27,7 @@ const knownApps: Record<string, true> = {};
 let rpcGen = 0;
 let rpcTimer: ReturnType<typeof setInterval> | null = null;
 let rpcDelay: ReturnType<typeof setTimeout> | null = null;
+let lastRpcSig = "";
 
 export { TimestampMode };
 
@@ -279,6 +280,9 @@ export async function setRpc(disable?: boolean) {
     try {
         const activity = disable ? null : (await createActivity() ?? null);
         if (gen !== rpcGen) return;
+        const sig = disable ? "" : JSON.stringify(activity);
+        if (!disable && sig === lastRpcSig) return;
+        lastRpcSig = sig;
         if (activity) shareActivity();
         FluxDispatcher.dispatch({
             type: "LOCAL_ACTIVITY_UPDATE",

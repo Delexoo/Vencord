@@ -95,11 +95,9 @@
     border-radius: 12px;
     color: var(--text-default, #dbdee1);
     font-family: var(--font-primary, "gg sans", "Segoe UI", sans-serif);
-    background: rgba(20, 21, 24, 0.72);
+    background: rgba(20, 21, 24, 0.94);
     border: 1px solid rgba(255, 255, 255, 0.1);
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.4);
     pointer-events: auto;
     overflow: visible;
 }
@@ -238,8 +236,6 @@
     padding: 5px;
     border-radius: 12px;
     background: rgba(17, 18, 22, 0.96);
-    backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
     border: 1px solid rgba(255, 255, 255, 0.12);
     box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
     animation: vc-ac-dd-in 0.14s ease-out;

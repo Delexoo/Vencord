@@ -5,7 +5,7 @@
  */
 
 import { Delexo } from "../_delexo/author";
-import { scheduleOnce } from "../_delexo/idle";
+import { scheduleOnce, watchBody } from "../_delexo/idle";
 import { definePluginSettings } from "@api/Settings";
 import ErrorBoundary from "@components/ErrorBoundary";
 import { getIntlMessage } from "@utils/discord";
@@ -37,7 +37,7 @@ const settings = definePluginSettings({
     autoVoice: {
         type: OptionType.BOOLEAN,
         description: "Start recording automatically when you join a voice chat",
-        default: true
+        default: false
     },
     captureSource: {
         type: OptionType.SELECT,
@@ -76,7 +76,7 @@ function captureMode(): CaptureMode {
 
 let hostRoot: Root | null = null;
 let panelRoot: Root | null = null;
-let observer: MutationObserver | null = null;
+let stopHostWatch: (() => void) | null = null;
 const placeHostSoon = scheduleOnce(150);
 let capturing = false;
 let inVoice = false;
@@ -417,6 +417,7 @@ function syncVoice(channelId: string | null) {
     const now = Boolean(channelId);
     inVoice = now;
     if (!now) {
+        stopVoiceWatch();
         panelOpen = false;
         void stopCapture();
         teardownPanel();
@@ -424,9 +425,27 @@ function syncVoice(channelId: string | null) {
         rerenderAll();
         return;
     }
+    startVoiceWatch();
     if (settings.store.autoVoice) void startCapture();
     queuePlaceHost();
     rerenderAll();
+}
+
+function startVoiceWatch() {
+    if (stopHostWatch) return;
+    stopHostWatch = watchBody(() => {
+        if (!inVoiceNow()) {
+            if (document.getElementById(HOST_ID)) queuePlaceHost();
+            return;
+        }
+        if (document.getElementById(HOST_ID)?.isConnected) return;
+        queuePlaceHost();
+    });
+}
+
+function stopVoiceWatch() {
+    stopHostWatch?.();
+    stopHostWatch = null;
 }
 
 function RecordIcon({ on }: { on: boolean; }) {
@@ -925,15 +944,7 @@ export default definePlugin({
         inVoice = inVoiceNow();
         lastFile = settings.store.lastFilePath || "";
         void resolveRecordDir();
-        observer = new MutationObserver(() => {
-            if (!inVoiceNow()) {
-                if (document.getElementById(HOST_ID)) queuePlaceHost();
-                return;
-            }
-            if (document.getElementById(HOST_ID)?.isConnected) return;
-            queuePlaceHost();
-        });
-        observer.observe(document.body, { childList: true, subtree: true });
+        if (inVoice) startVoiceWatch();
         document.addEventListener("click", onDocClick, true);
         placeHost();
         if (inVoice && settings.store.autoVoice)
@@ -944,8 +955,7 @@ export default definePlugin({
 
     stop() {
         placeHostSoon.cancel();
-        observer?.disconnect();
-        observer = null;
+        stopVoiceWatch();
         document.removeEventListener("click", onDocClick, true);
         panelOpen = false;
         teardownPanel();

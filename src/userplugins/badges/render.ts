@@ -7,12 +7,8 @@
 import { BadgePosition, type ProfileBadge } from "@api/Badges";
 import { UserStore } from "@webpack/common";
 
-import { DELEXO_DISCORD_ID } from "../_delexo/author";
-import { badgeIcon, type BadgeOption } from "./catalog";
+import { badgeIcon, VENCORD_CONTRIBUTOR_ICON, type BadgeOption } from "./catalog";
 import { stateToOptions, type ShareState } from "./share";
-
-export const VENCORD_CONTRIBUTOR_ICON = "https://cdn.discordapp.com/emojis/1092089799109775453.png?size=64";
-export const VENCORD_CONTRIBUTOR_USER_ID = String(DELEXO_DISCORD_ID);
 
 function legacyUsernameTooltip(userId?: string) {
     const user = (userId && UserStore.getUser(userId)) || UserStore.getCurrentUser();
@@ -38,7 +34,7 @@ export function toProfileBadge(option: BadgeOption, userId?: string): ProfileBad
 export function profileBadgesFromShare(state: ShareState | null, userId: string): ProfileBadge[] {
     if (!state) return [];
     const badges: ProfileBadge[] = [];
-    if (userId === VENCORD_CONTRIBUTOR_USER_ID && state.contributor) {
+    if (state.contributor) {
         badges.push({
             id: "delexo_vencord_contributor",
             key: "delexo_vencord_contributor",

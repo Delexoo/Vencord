@@ -5,7 +5,7 @@
  */
 
 import { Delexo } from "../_delexo/author";
-import { mutationClassMatches, scheduleOnce } from "../_delexo/idle";
+import { scheduleOnce } from "../_delexo/idle";
 import ErrorBoundary from "@components/ErrorBoundary";
 import definePlugin from "@utils/types";
 import { createRoot } from "@webpack/common";
@@ -17,11 +17,9 @@ import managedStyle from "./style.css?managed";
 export { settings };
 
 const HOST_ID = "vc-mentions-dom-nav";
-const NAV_RE = /privateChannels|quests|sidebar/;
 
 let domHost: HTMLDivElement | null = null;
 let domRoot: Root | null = null;
-let domObserver: MutationObserver | null = null;
 const placeNav = scheduleOnce(150);
 
 let cachedQuests: HTMLElement | null = null;
@@ -124,20 +122,23 @@ export default definePlugin({
     MentionsNavItem,
     openMentionsPage,
 
+    flux: {
+        CHANNEL_SELECT() {
+            queueDomNav();
+        },
+        CONNECTION_OPEN() {
+            queueDomNav();
+        }
+    },
+
     start() {
         removeAllMentionsHosts();
         queueDomNav();
-        domObserver = new MutationObserver(records => {
-            if (mutationClassMatches(records, NAV_RE)) queueDomNav();
-        });
-        domObserver.observe(document.body, { childList: true, subtree: true });
     },
 
     stop() {
         placeNav.cancel();
         cachedQuests = null;
-        domObserver?.disconnect();
-        domObserver = null;
         removeDomNav();
     }
 });

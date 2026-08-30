@@ -512,6 +512,12 @@ sealed class InstallerForm : Form
         var destLegacy = Path.Combine(_toolsDir, "Update-Vencord.ps1");
 
         var candidates = new List<string>();
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        foreach (var name in ScriptNames)
+        {
+            candidates.Add(Path.Combine(home, @"OneDrive\Desktop\Vencord\installer", name));
+            candidates.Add(Path.Combine(home, @"Desktop\Vencord\installer", name));
+        }
         var exePath = Environment.ProcessPath ?? "";
         var exeDir = string.IsNullOrEmpty(exePath) ? "" : Path.GetDirectoryName(exePath) ?? "";
         if (!string.IsNullOrEmpty(exeDir))
@@ -525,12 +531,6 @@ sealed class InstallerForm : Form
         }
         foreach (var name in ScriptNames)
             candidates.Add(Path.Combine(AppContext.BaseDirectory, name));
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        foreach (var name in ScriptNames)
-        {
-            candidates.Add(Path.Combine(home, @"OneDrive\Desktop\Vencord\installer", name));
-            candidates.Add(Path.Combine(home, @"Desktop\Vencord\installer", name));
-        }
 
         foreach (var src in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
         {

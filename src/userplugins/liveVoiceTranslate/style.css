@@ -3,19 +3,16 @@
     right: 14px;
     bottom: 78px;
     z-index: 100000;
-    width: 292px;
-    height: 268px;
-    min-width: 176px;
-    min-height: 110px;
+    width: 220px;
+    height: 248px;
+    min-width: 148px;
+    min-height: 92px;
     max-width: calc(100vw - 12px);
     max-height: calc(100vh - 12px);
     display: flex;
     pointer-events: auto;
     font-family: var(--font-primary, "gg sans", "Segoe UI", sans-serif);
     color: #dbdee1;
-    animation: spyt-mount 0.22s ease;
-    container-type: size;
-    container-name: spyt-live;
 }
 
 #spyt-live-root,
@@ -38,8 +35,8 @@
 }
 
 #spyt-live-root.spyt-live-min {
-    height: 48px !important;
-    min-height: 48px;
+    height: 40px !important;
+    min-height: 40px;
 }
 
 #spyt-live-root.spyt-live-min .spyt-live-body-wrap,
@@ -52,11 +49,11 @@
 
 #spyt-live-root.spyt-live-min .spyt-live-bar {
     height: 100%;
-    padding: 6px 8px;
+    padding: 4px 6px;
 }
 
 #spyt-live-root.spyt-live-min .spyt-live-hide {
-    min-width: 52px;
+    min-width: 44px;
     background: #5865f2;
     color: #fff;
 }
@@ -75,8 +72,8 @@
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 6px;
-    padding: clamp(4px, 1.6cqh, 10px) clamp(6px, 2cqw, 12px) clamp(3px, 1.2cqh, 8px);
+    gap: 4px;
+    padding: clamp(3px, 1.4cqh, 7px) clamp(5px, 1.8cqw, 9px) clamp(2px, 1cqh, 6px);
     flex-shrink: 0;
     cursor: grab;
     touch-action: none;
@@ -92,29 +89,18 @@
     display: flex;
     flex-direction: column;
     overflow: visible;
-    border-radius: clamp(10px, 2.4cqw, 16px);
-    background: rgba(22, 24, 28, 0.78);
-    backdrop-filter: blur(18px) saturate(1.15);
-    -webkit-backdrop-filter: blur(18px) saturate(1.15);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
-}
-
-#spyt-live-root.spyt-idle .spyt-live-card {
-    animation: spyt-idle-border 3s ease-in-out infinite;
-}
-
-@keyframes spyt-idle-border {
-    0%, 100% { border-color: rgba(35, 165, 90, 0.18); }
-    50% { border-color: rgba(35, 165, 90, 0.42); }
+    border-radius: clamp(8px, 2.2cqw, 12px);
+    background: rgba(16, 18, 22, 0.72);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.22);
 }
 
 .spyt-live-drag {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
     min-width: 0;
-    flex: 1 1 132px;
+    flex: 1 1 108px;
     cursor: grab;
     touch-action: none;
     border-radius: 8px;
@@ -143,9 +129,9 @@
     align-items: flex-end;
     justify-content: center;
     gap: 1.5px;
-    width: 16px;
-    height: 16px;
-    padding: 2px 3px 3px;
+    width: 13px;
+    height: 13px;
+    padding: 2px 2px 2px;
     flex-shrink: 0;
     border-radius: 50%;
     background: rgba(109, 112, 120, 0.28);
@@ -185,7 +171,7 @@
 
 .spyt-live-titles strong {
     display: block;
-    font-size: clamp(11px, 3.4cqw, 16px);
+    font-size: clamp(10px, 3.4cqw, 13px);
     font-weight: 650;
     letter-spacing: 0.01em;
     line-height: 1.15;
@@ -197,7 +183,7 @@
 
 .spyt-live-status {
     display: block;
-    font-size: clamp(9px, 2.6cqw, 12px);
+    font-size: clamp(8px, 2.6cqw, 10px);
     color: #949ba4;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -218,12 +204,12 @@
     appearance: none;
     border: 0;
     border-radius: 7px;
-    padding: clamp(4px, 1.2cqh, 8px) clamp(7px, 2cqw, 12px);
-    font-size: clamp(10px, 3cqw, 13px);
+    padding: clamp(3px, 1.1cqh, 6px) clamp(6px, 1.8cqw, 9px);
+    font-size: clamp(9px, 3cqw, 11px);
     font-weight: 600;
     line-height: 1.2;
     color: #c4c9ce;
-    background: rgba(255, 255, 255, 0.06);
+    background: rgba(255, 255, 255, 0.035);
     cursor: pointer;
     touch-action: manipulation;
     position: relative;
@@ -236,7 +222,7 @@
 .spyt-live-btn[data-act="listen"] {
     background: #5865f2;
     color: #fff;
-    min-width: 46px;
+    min-width: 40px;
 }
 
 .spyt-live-btn[data-act="listen"]:hover { background: #6a75f5; }
@@ -257,8 +243,8 @@
 .spyt-live-langs {
     display: flex;
     align-items: stretch;
-    gap: clamp(4px, 1.4cqw, 10px);
-    padding: 0 clamp(6px, 2cqw, 12px) clamp(4px, 1.4cqh, 8px);
+    gap: clamp(3px, 1.2cqw, 7px);
+    padding: 0 clamp(5px, 1.8cqw, 9px) clamp(3px, 1.2cqh, 6px);
     flex-shrink: 0;
     min-width: 0;
 }
@@ -266,7 +252,7 @@
 .spyt-adv {
     flex: 0 1 auto;
     min-height: 0;
-    padding: 0 clamp(6px, 2cqw, 12px) clamp(4px, 1.4cqh, 8px);
+    padding: 0 clamp(5px, 1.8cqw, 9px) clamp(3px, 1.2cqh, 6px);
 }
 
 .spyt-adv-toggle {
@@ -280,7 +266,7 @@
     padding: 4px 6px;
     background: transparent;
     color: #9aa0a6;
-    font-size: 10px;
+    font-size: 9px;
     font-weight: 700;
     letter-spacing: 0.04em;
     text-transform: uppercase;
@@ -323,7 +309,7 @@
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 8px;
     padding: clamp(6px, 1.6cqh, 10px) 4px;
-    background: rgba(255, 255, 255, 0.05);
+    background: rgba(255, 255, 255, 0.03);
     color: #dbdee1;
     font-size: clamp(10px, 3cqw, 13px);
     font-weight: 600;
@@ -364,7 +350,7 @@
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 8px;
     padding: clamp(4px, 1.1cqh, 8px) clamp(6px, 2cqw, 12px);
-    background: rgba(255, 255, 255, 0.05);
+    background: rgba(255, 255, 255, 0.03);
     color: #e8eaed;
     cursor: pointer;
     text-align: left;
@@ -389,7 +375,7 @@
 .spyt-dd-value {
     flex: 1;
     min-width: 0;
-    font-size: clamp(11px, 3.2cqw, 14px);
+    font-size: clamp(10px, 3.2cqw, 12px);
     font-weight: 600;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -419,9 +405,7 @@
     overflow: auto;
     padding: 4px;
     border-radius: 10px;
-    background: rgba(17, 18, 22, 0.94);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
+    background: rgba(17, 18, 22, 0.96);
     border: 1px solid rgba(255, 255, 255, 0.12);
     box-shadow: 0 14px 32px rgba(0, 0, 0, 0.42);
 }
@@ -466,43 +450,43 @@
 }
 
 .spyt-caption {
-    flex: 1.8 1 0;
-    min-height: 0;
+    flex: 1 1 auto;
+    min-height: 72px;
     min-width: 0;
-    margin: 0 clamp(6px, 2cqw, 14px) clamp(4px, 1.4cqh, 10px);
-    padding: clamp(8px, 2cqh, 16px) clamp(10px, 2.6cqw, 18px);
+    margin: 0 clamp(5px, 1.8cqw, 10px) clamp(3px, 1.2cqh, 7px);
+    padding: 8px 10px;
     overflow: auto;
-    border-radius: clamp(8px, 2cqw, 14px);
-    background: rgba(0, 0, 0, 0.22);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    background: rgba(8, 10, 14, 0.62);
+    border: 1px solid rgba(255, 255, 255, 0.16);
     cursor: help;
 }
 
 .spyt-caption-kicker {
     display: block;
-    font-size: 8px;
+    font-size: 9px;
     font-weight: 700;
     letter-spacing: 0.06em;
     text-transform: uppercase;
-    color: #8b929a;
+    color: #c4c9ce;
     margin-bottom: 4px;
 }
 
 .spyt-caption-en {
     display: block;
-    font-size: clamp(13px, 5cqw, 32px);
+    font-size: 14px;
     font-weight: 650;
     line-height: 1.35;
-    color: #f2f3f5;
+    color: #fff;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     word-break: break-word;
 }
 
 .spyt-caption.is-empty .spyt-caption-en {
-    font-size: clamp(12px, 3.6cqw, 18px);
+    font-size: 13px;
     font-weight: 500;
-    color: #8b929a;
+    color: #dbe0e5;
 }
 
 .spyt-caption.spyt-live .spyt-caption-en::after {
@@ -510,7 +494,6 @@
     margin-left: 3px;
     font-weight: 400;
     opacity: 0.5;
-    animation: spyt-caret 0.9s steps(1) infinite;
 }
 
 .spyt-orig-float {
@@ -520,8 +503,6 @@
     padding: 8px 10px;
     border-radius: 10px;
     background: rgba(12, 13, 16, 0.96);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
     border: 1px solid rgba(255, 255, 255, 0.14);
     box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
     pointer-events: none;
@@ -559,7 +540,7 @@
     flex-direction: column;
     border-top: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 0 0 12px 12px;
-    background: rgba(0, 0, 0, 0.12);
+    background: rgba(0, 0, 0, 0.06);
 }
 
 .spyt-live-feed {
@@ -605,16 +586,6 @@
     border-radius: 99px;
     background: #23a55a;
     transform-origin: bottom;
-    animation: spyt-idle-wave 1.6s ease-in-out infinite;
-}
-
-.spyt-idle-waves i:nth-child(1) { animation-delay: 0s; }
-.spyt-idle-waves i:nth-child(2) { animation-delay: 0.18s; }
-.spyt-idle-waves i:nth-child(3) { animation-delay: 0.36s; }
-
-@keyframes spyt-idle-wave {
-    0%, 100% { transform: scaleY(0.25); opacity: 0.4; }
-    50% { transform: scaleY(1); opacity: 1; }
 }
 
 .spyt-line {
@@ -656,7 +627,7 @@
 
 .spyt-line-en {
     display: block;
-    font-size: clamp(12px, 4cqw, 20px);
+    font-size: clamp(11px, 4cqw, 16px);
     line-height: 1.3;
     font-weight: 600;
     color: #f2f3f5;
@@ -667,11 +638,6 @@
     margin-left: 3px;
     font-weight: 400;
     opacity: 0.5;
-    animation: spyt-caret 0.9s steps(1) infinite;
-}
-
-@keyframes spyt-caret {
-    50% { opacity: 0; }
 }
 
 .spyt-live-resize {
@@ -736,21 +702,21 @@
     display: block;
 }
 
-@container spyt-live (max-width: 248px) {
+@container spyt-live (max-width: 196px) {
     .spyt-dd-kicker { display: none; }
     .spyt-live-arrow { display: none; }
 }
 
-@container spyt-live (max-height: 200px) {
+@container spyt-live (max-height: 160px) {
     .spyt-adv-toggle { padding: 2px 6px; }
-    .spyt-adv-body { max-height: 72px; }
+    .spyt-adv-body { max-height: 56px; }
 }
 
-@container spyt-live (min-width: 420px) {
+@container spyt-live (min-width: 340px) {
     .spyt-caption { flex: 2.2 1 0; }
 }
 
-@container spyt-live (min-height: 420px) {
+@container spyt-live (min-height: 340px) {
     .spyt-caption { flex: 2.4 1 0; }
     .spyt-live-body-wrap { flex: 1.1 1 0; }
 }

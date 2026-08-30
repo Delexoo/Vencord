@@ -8,18 +8,6 @@
     border: 0 !important;
 }
 
-:is(a, button, div, span):has(> .vc-profile-button-slot-empty) {
-    display: none !important;
-    width: 0 !important;
-    height: 0 !important;
-    min-width: 0 !important;
-    min-height: 0 !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    overflow: hidden !important;
-    border: 0 !important;
-    pointer-events: none !important;
-}
 
 .vc-profile-button-badge,
 .vc-profile-button-badge * {
@@ -89,34 +77,4 @@
     display: none !important;
     width: 0 !important;
     height: 0 !important;
-}
-
-:is(a, button, div, span):has(> .vc-profile-button-share),
-div:has(> .vc-profile-button-share),
-span:has(> .vc-profile-button-share) {
-    display: inline-flex !important;
-    align-items: center !important;
-    justify-content: flex-start !important;
-    width: auto !important;
-    min-width: 0 !important;
-    max-width: none !important;
-    height: 22px !important;
-    overflow: visible !important;
-    pointer-events: auto !important;
-}
-
-.vc-profile-button-share {
-    display: inline-flex !important;
-    align-items: center;
-    gap: 2px;
-    width: max-content;
-    max-width: none;
-    vertical-align: middle;
-}
-
-.vc-profile-button-share-img {
-    width: 22px;
-    height: 22px;
-    object-fit: contain;
-    vertical-align: middle;
 }

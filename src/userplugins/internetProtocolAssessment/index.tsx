@@ -133,11 +133,16 @@ const settings = definePluginSettings({
     showOverlay: {
         type: OptionType.BOOLEAN,
         description: "Show the floating connection overlay",
-        default: true,
+        default: false,
         onChange(v: boolean) {
             if (v) void ensureUi();
             else teardownUi();
         }
+    },
+    autoCapture: {
+        type: OptionType.BOOLEAN,
+        description: "Start Wireshark/TShark capture when you join a voice channel",
+        default: false
     },
     openFolders: {
         type: OptionType.COMPONENT,
@@ -1237,6 +1242,11 @@ function inVoiceNow(): boolean {
 }
 
 async function syncVoiceCapture() {
+    if (!settings.store.showOverlay || !settings.store.autoCapture) {
+        if (wiresharkSnapshot.running || captureBusy)
+            await stopLocalCapture();
+        return;
+    }
     const inVoice = inVoiceNow();
     if (inVoice) {
         if (wiresharkSnapshot.running || captureBusy) return;
@@ -3320,9 +3330,9 @@ function StatRow({ label, value }: { label: string; value: string; }) {
 }
 
 function overlayPollMs() {
-    if (uiState.minimized) return 3000;
-    if (stats.connected || inVoiceNow()) return 1500;
-    return 4000;
+    if (uiState.minimized) return 8000;
+    if (stats.connected || inVoiceNow()) return 2500;
+    return 12000;
 }
 
 function schedulePoll() {
@@ -3337,6 +3347,7 @@ function scheduleWirePoll() {
 }
 
 async function refreshStats() {
+    if (!settings.store.showOverlay) return;
     if (refreshBusy) return;
     refreshBusy = true;
     try {
@@ -3421,27 +3432,29 @@ export default definePlugin({
 
     flux: {
         VOICE_STATE_UPDATES() {
-            void refreshStats();
+            if (settings.store.showOverlay) void refreshStats();
         },
         VOICE_CHANNEL_SELECT() {
-            void refreshStats();
+            if (settings.store.showOverlay) void refreshStats();
         },
         VOICE_CHANNEL_SELECT_V2() {
-            void refreshStats();
+            if (settings.store.showOverlay) void refreshStats();
         },
         RTC_CONNECTION_STATE() {
-            void refreshStats();
+            if (settings.store.showOverlay) void refreshStats();
         },
         PRESENCE_UPDATES() {
-            if (inVoiceNow() || stats.participants.length)
+            if (settings.store.showOverlay && (inVoiceNow() || stats.participants.length))
                 void refreshStats();
         }
     },
 
     async start() {
         await loadUiState();
-        await ensureUi();
-        void syncVoiceCapture();
+        if (settings.store.showOverlay) {
+            await ensureUi();
+            void syncVoiceCapture();
+        }
     },
 
     stop() {

@@ -67,7 +67,6 @@ const touched = new Set<Text>();
 
 let running = false;
 let real: RealNames = { username: "", globalName: "" };
-let observer: MutationObserver | null = null;
 let applying = false;
 let liveRaf = 0;
 let origGetUser: ((id: string) => any) | null = null;
@@ -259,7 +258,6 @@ function scanAll() {
     if (!running) return;
     pruneTouched();
     applying = true;
-    observer?.disconnect();
     try {
         for (const node of [...touched]) {
             if (!isOwnUserNode(node)) forgetNode(node);
@@ -267,19 +265,6 @@ function scanAll() {
         walk(document.body);
     } finally {
         applying = false;
-        startObserver();
-    }
-}
-
-function scanNodes(nodes: Iterable<Node>) {
-    if (!running) return;
-    applying = true;
-    observer?.disconnect();
-    try {
-        for (const node of nodes) walk(node);
-    } finally {
-        applying = false;
-        startObserver();
     }
 }
 
@@ -299,47 +284,6 @@ function applyLive() {
         try { scanAll(); } catch { /* ignore */ }
         refreshUsers();
     });
-}
-
-let pending: Node[] = [];
-let pendingTimer = 0;
-
-function queueNodes(nodes: Node[]) {
-    pending.push(...nodes);
-    if (pendingTimer) return;
-    pendingTimer = window.setTimeout(() => {
-        pendingTimer = 0;
-        const batch = pending;
-        pending = [];
-        try { scanNodes(batch); } catch { /* ignore */ }
-    }, 40);
-}
-
-function startObserver() {
-    observer?.disconnect();
-    if (!running) return;
-    observer = new MutationObserver(records => {
-        if (applying) return;
-        const nodes: Node[] = [];
-        for (const rec of records) {
-            if (rec.type === "characterData") {
-                const text = rec.target.nodeValue ?? "";
-                if (text.length > MAX_LEN + 12) continue;
-                if (
-                    real.username && !text.includes(real.username) &&
-                    real.globalName && !text.includes(real.globalName)
-                ) continue;
-                const parent = rec.target.parentNode;
-                if (parent && !skipNode(parent)) nodes.push(parent);
-                continue;
-            }
-            for (const node of rec.addedNodes) {
-                if (!skipNode(node)) nodes.push(node);
-            }
-        }
-        if (nodes.length) queueNodes(nodes);
-    });
-    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
 }
 
 function ownId() {
@@ -497,7 +441,6 @@ export default definePlugin({
         running = true;
         patchStores();
         hookUser(origGetCurrentUser?.() ?? UserStore.getCurrentUser());
-        startObserver();
         applyLive();
     },
 
@@ -505,10 +448,6 @@ export default definePlugin({
         running = false;
         if (liveRaf) cancelAnimationFrame(liveRaf);
         liveRaf = 0;
-        if (pendingTimer) clearTimeout(pendingTimer);
-        pendingTimer = 0;
-        observer?.disconnect();
-        observer = null;
         unhookAll();
         unpatchStores();
         restoreTouched();

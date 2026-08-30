@@ -225,14 +225,15 @@ try {
             Invoke-Git @("remote", "set-url", "upstream", $UpstreamUrl)
         }
 
-        Write-Log "Fetching official Vendicated/Vencord"
-        Invoke-Git @("fetch", "origin", "--prune")
-        [void](Invoke-Native "git.exe" @("fetch", "upstream", "--prune") -AllowFail)
-        Invoke-Git @("checkout", "main")
+        Write-Log "Fetching official Vendicated/Vencord (dev + tags)"
+        Invoke-Git @("fetch", "origin", "--tags", "--prune")
+        [void](Invoke-Native "git.exe" @("fetch", "upstream", "--tags", "--prune") -AllowFail)
+        # Latest Vencord releases land on origin/dev (e.g. v1.15.4). main can stay behind.
         Remove-TreeForce (Join-Path $VencordDir "src\userplugins")
-        Invoke-Git @("reset", "--hard", "origin/main")
+        Invoke-Git @("checkout", "-B", "dev", "origin/dev")
+        Invoke-Git @("reset", "--hard", "origin/dev")
         Invoke-GitCleanNonInteractive
-        [void](Invoke-Native "git.exe" @("branch", "--set-upstream-to=origin/main", "main") -AllowFail)
+        [void](Invoke-Native "git.exe" @("branch", "--set-upstream-to=origin/dev", "dev") -AllowFail)
 
         Write-Log "Pulling plugins from Delexoo/Vencord"
         $tmp = Join-Path $env:TEMP ("vencord-plugins-" + [guid]::NewGuid().ToString("n"))
@@ -329,7 +330,21 @@ try {
         if ($overlayed -lt 1) {
             throw "No plugins were overlayed from $sourceRoot"
         }
-        Write-Log "Official Vencord left untouched. Delexo plugins are addons only."
+
+        $desktopRepo = Split-Path $sourceRoot -Parent | Split-Path -Parent
+        $corePatches = @(
+            "src\plugins\_api\badges\fixDiscordBadgePadding.css"
+        )
+        foreach ($rel in $corePatches) {
+            $from = Join-Path $desktopRepo $rel
+            $to = Join-Path $VencordDir $rel
+            if (-not (Test-Path -LiteralPath $from)) { continue }
+            New-Item -ItemType Directory -Force -Path (Split-Path $to -Parent) | Out-Null
+            Copy-Item -LiteralPath $from -Destination $to -Force
+            Write-Log "Patched official file $rel"
+        }
+
+        Write-Log "Official Vencord updated to origin/dev. Delexo plugins are addons only."
     } finally {
         Pop-Location
         if ($tmp -and (Test-Path $tmp)) {

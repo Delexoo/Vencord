@@ -5,7 +5,6 @@
  */
 
 import { Delexo } from "../_delexo/author";
-import { mutationClassMatches } from "../_delexo/idle";
 import * as DataStore from "@api/DataStore";
 import { definePluginSettings } from "@api/Settings";
 import definePlugin, { OptionType } from "@utils/types";
@@ -16,7 +15,6 @@ import managedStyle from "./style.css?managed";
 
 const STORE_KEY = "LastOnlineTimestamps";
 const SEEN_KEY = "LastOnlineSeenOnline";
-const UI_PLACE_RE = /title|subtitle|userProfile|userPopout|profilePanel|chat/;
 
 type TipKind = "last" | "unknown";
 
@@ -56,7 +54,6 @@ let headerHost: HTMLDivElement | null = null;
 let headerRoot: Root | null = null;
 let profileHost: HTMLElement | null = null;
 let profileRoot: Root | null = null;
-let uiObserver: MutationObserver | null = null;
 let timerHandle: ReturnType<typeof setTimeout> | null = null;
 let placeTimer: ReturnType<typeof setTimeout> | null = null;
 /** Last hovered DM row (for live tip refresh while pointer stays put). */
@@ -566,10 +563,10 @@ function scheduleTimer() {
             ages.push(Date.now() - offlineAt[pid]);
     }
 
-    // Keep UI placement fresh even when everyone is online / unknown
-    const delay = ages.length
-        ? Math.min(...ages.map(tickDelayForAge))
-        : 15_000;
+    if (!ages.length) {
+        timerHandle = null;
+        return;
+    }
 
     timerHandle = setTimeout(() => {
         timerHandle = null;
@@ -580,7 +577,7 @@ function scheduleTimer() {
         } finally {
             scheduleTimer();
         }
-    }, delay);
+    }, Math.min(...ages.map(tickDelayForAge)));
 }
 
 function onPointerOver(e: Event) {
@@ -704,10 +701,6 @@ export default definePlugin({
         document.addEventListener("pointerover", onPointerOver, true);
         document.addEventListener("pointerout", onPointerOut, true);
 
-        uiObserver = new MutationObserver(records => {
-            if (mutationClassMatches(records, UI_PLACE_RE)) queueUiPlace();
-        });
-        uiObserver.observe(document.body, { childList: true, subtree: true });
         window.addEventListener("resize", queueUiPlace);
         queueUiPlace();
         scheduleTimer();
@@ -719,8 +712,6 @@ export default definePlugin({
         window.removeEventListener("resize", queueUiPlace);
         if (hideTimer != null) clearTimeout(hideTimer);
         teardownTipHost();
-        uiObserver?.disconnect();
-        uiObserver = null;
         if (placeTimer != null) clearTimeout(placeTimer);
         placeTimer = null;
         if (timerHandle != null) clearTimeout(timerHandle);

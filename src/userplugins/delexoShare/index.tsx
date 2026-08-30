@@ -209,51 +209,16 @@ function ProfileButtonBadge(props: ProfileBadge & BadgeUserArgs) {
     );
 }
 
-function SharedBadges(props: ProfileBadge & BadgeUserArgs) {
-    const userId = resolveUserId(props);
-    const profile = useStateFromStores(
-        [UserProfileStore],
-        () => profileOf(userId)
-    );
-
-    useEffect(() => {
-        if (userId) noteOpenProfile(userId);
-    }, [userId]);
-
-    const badges = profileBadgesFromShare(
-        badgeShareFor(userId, {
-            ...props,
-            userId,
-            bio: profile?.bio ?? (props as ProfileArgs).bio
-        }),
-        userId
-    );
-
-    if (!badges.length) return <span className={cl("slot-empty")} aria-hidden />;
-
-    return (
-        <span className={cl("share")}>
-            {badges.map(badge => (
-                <Tooltip key={badge.id} text={badge.description ?? ""}>
-                    {tip => (
-                        <img
-                            {...tip}
-                            className={cl("share-img")}
-                            src={badge.iconSrc}
-                            alt={badge.description ?? ""}
-                        />
-                    )}
-                </Tooltip>
-            ))}
-        </span>
-    );
-}
-
 function getBadges(args: BadgeUserArgs): ProfileBadge[] {
     const userId = resolveUserId(args);
     if (userId) noteOpenProfile(userId);
     const bio = shareBio(userId, args as ProfileArgs);
     const button = buttonShareFor(userId, args as ProfileArgs);
+    const shared = profileBadgesFromShare(
+        badgeShareFor(userId, { ...args, userId, bio } as ProfileArgs),
+        userId
+    );
+
     return [{
         id: "delexo_profile_button",
         key: "delexo_profile_button",
@@ -268,14 +233,14 @@ function getBadges(args: BadgeUserArgs): ProfileBadge[] {
             const next = buttonShareFor(userId, args as ProfileArgs);
             if (next) openButtonUrl(next.url);
         }
-    }, {
-        id: "delexo_share_badges",
-        key: "delexo_share_badges",
-        userId,
-        bio,
-        component: SharedBadges,
+    }, ...shared.map(badge => ({
+        id: badge.id,
+        key: badge.key ?? badge.id,
+        description: badge.description,
+        iconSrc: badge.iconSrc,
+        link: badge.link,
         position: BadgePosition.START
-    }];
+    }))];
 }
 
 const profileBadge: ProfileBadge = {

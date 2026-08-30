@@ -47,6 +47,7 @@ const KEEP_OPTIONS = [
 
 const live = new Map<string, SavedMessage>();
 let purgeTimer: ReturnType<typeof setInterval> | null = null;
+let emitTimer = 0;
 let injected = false;
 let nativeWarned = false;
 
@@ -160,7 +161,11 @@ function orderCache(cache: any) {
 
 function commitOrdered(cache: any) {
     MessageCache.commit(orderCache(cache));
-    MessageStore.emitChange();
+    if (emitTimer) return;
+    emitTimer = window.setTimeout(() => {
+        emitTimer = 0;
+        MessageStore.emitChange();
+    }, 80);
 }
 
 function inLoadedWindow(cache: any, id: string) {
