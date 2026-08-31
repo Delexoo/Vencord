@@ -1,6 +1,6 @@
-#spyt-live-root {
+#spyt-live2-root {
     position: fixed;
-    right: 14px;
+    left: 14px;
     bottom: 78px;
     z-index: 100000;
     width: 280px;
@@ -15,8 +15,8 @@
     color: #dbdee1;
 }
 
-#spyt-live-root,
-#spyt-live-root * {
+#spyt-live2-root,
+#spyt-live2-root * {
     pointer-events: auto;
     user-select: none;
     box-sizing: border-box;
@@ -24,19 +24,19 @@
     -ms-overflow-style: none;
 }
 
-#spyt-live-root::-webkit-scrollbar,
-#spyt-live-root *::-webkit-scrollbar {
+#spyt-live2-root::-webkit-scrollbar,
+#spyt-live2-root *::-webkit-scrollbar {
     width: 0;
     height: 0;
     display: none;
     background: transparent;
 }
 
-#spyt-live-root .spyt-live-feed,
-#spyt-live-root .spyt-line,
-#spyt-live-root .spyt-caption,
-#spyt-live-root .spyt-line-orig,
-#spyt-live-root .spyt-line-text {
+#spyt-live2-root .spyt-live-feed,
+#spyt-live2-root .spyt-line,
+#spyt-live2-root .spyt-caption,
+#spyt-live2-root .spyt-line-orig,
+#spyt-live2-root .spyt-line-text {
     user-select: text;
 }
 
@@ -45,36 +45,36 @@
     to { opacity: 1; transform: none; }
 }
 
-#spyt-live-root.spyt-live-min {
+#spyt-live2-root.spyt-live-min {
     height: 30px !important;
     min-height: 30px;
 }
 
-#spyt-live-root.spyt-live-min .spyt-live-langs,
-#spyt-live-root.spyt-live-min .spyt-adv,
-#spyt-live-root.spyt-live-min .spyt-caption {
+#spyt-live2-root.spyt-live-min .spyt-live-langs,
+#spyt-live2-root.spyt-live-min .spyt-adv,
+#spyt-live2-root.spyt-live-min .spyt-caption {
     display: none;
 }
 
-#spyt-live-root.spyt-live-min .spyt-live-bar {
+#spyt-live2-root.spyt-live-min .spyt-live-bar {
     height: 100%;
     padding: 2px 4px;
 }
 
-#spyt-live-root.spyt-live-min .spyt-live-hide {
+#spyt-live2-root.spyt-live-min .spyt-live-hide {
     min-width: 44px;
     background: #5865f2;
     border-color: #5865f2;
     color: #fff;
 }
 
-#spyt-live-root.spyt-live-dragging,
-#spyt-live-root.spyt-live-resizing {
+#spyt-live2-root.spyt-live-dragging,
+#spyt-live2-root.spyt-live-resizing {
     cursor: grabbing;
 }
 
-#spyt-live-root.spyt-live-resizing,
-#spyt-live-root.spyt-live-resizing * {
+#spyt-live2-root.spyt-live-resizing,
+#spyt-live2-root.spyt-live-resizing * {
     user-select: none !important;
 }
 
@@ -159,20 +159,20 @@
     transform: scaleY(0.28);
 }
 
-#spyt-live-root.spyt-on .spyt-live-dot {
+#spyt-live2-root.spyt-on .spyt-live-dot {
     background: rgba(35, 165, 90, 0.28);
 }
 
-#spyt-live-root.spyt-on .spyt-live-dot i {
+#spyt-live2-root.spyt-on .spyt-live-dot i {
     background: #23a55a;
 }
 
-#spyt-live-root.spyt-hear .spyt-live-dot {
+#spyt-live2-root.spyt-hear .spyt-live-dot {
     background: rgba(87, 242, 135, 0.22);
     box-shadow: 0 0 0 3px rgba(87, 242, 135, 0.16);
 }
 
-#spyt-live-root.spyt-hear .spyt-live-dot i {
+#spyt-live2-root.spyt-hear .spyt-live-dot i {
     background: #57f287;
 }
 
@@ -201,8 +201,8 @@
     font-weight: 700;
     letter-spacing: 0.03em;
     text-transform: uppercase;
-    color: #b5bac1;
-    background: rgba(255, 255, 255, 0.08);
+    color: #e3c566;
+    background: rgba(240, 178, 50, 0.16);
     border-radius: 3px;
     padding: 0 3px;
 }
@@ -271,12 +271,12 @@
 
 .spyt-live-btn[data-act="listen"]:hover { background: #6a75f5; border-color: #6a75f5; }
 
-#spyt-live-root.spyt-on .spyt-live-btn[data-act="listen"] {
+#spyt-live2-root.spyt-on .spyt-live-btn[data-act="listen"] {
     background: #d83c3e;
     border-color: #d83c3e;
 }
 
-#spyt-live-root.spyt-on .spyt-live-btn[data-act="listen"]:hover {
+#spyt-live2-root.spyt-on .spyt-live-btn[data-act="listen"]:hover {
     background: #e14a4c;
     border-color: #e14a4c;
 }
@@ -352,13 +352,13 @@
 
 .spyt-adv-toggle:hover { color: #e8eaed; background: rgba(255, 255, 255, 0.05); }
 
-#spyt-live-root.spyt-adv-open .spyt-adv-toggle .spyt-dd-caret {
+#spyt-live2-root.spyt-adv-open .spyt-adv-toggle .spyt-dd-caret {
     transform: rotate(180deg);
 }
 
 .spyt-adv-body { display: none; }
 
-#spyt-live-root.spyt-adv-open .spyt-adv-body {
+#spyt-live2-root.spyt-adv-open .spyt-adv-body {
     display: flex;
     flex-direction: column;
     gap: 3px;
@@ -707,12 +707,12 @@
 
 .spyt-live-resize-grip:hover { opacity: 0.85; }
 
-#spyt-live-root.spyt-live-min .spyt-live-resize {
+#spyt-live2-root.spyt-live-min .spyt-live-resize {
     display: none;
 }
 
-#spyt-live-root.spyt-live-min .spyt-live-resize[data-edge="e"],
-#spyt-live-root.spyt-live-min .spyt-live-resize[data-edge="w"] {
+#spyt-live2-root.spyt-live-min .spyt-live-resize[data-edge="e"],
+#spyt-live2-root.spyt-live-min .spyt-live-resize[data-edge="w"] {
     display: block;
 }
 
@@ -732,4 +732,70 @@
 
 @container spyt-live (min-height: 340px) {
     .spyt-caption { flex: 2.4 1 0; }
+}
+
+.spyt-live-key {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+}
+
+.spyt-live-key-title {
+    color: var(--header-primary, #f2f3f5);
+}
+
+.spyt-live-key-desc {
+    color: var(--header-secondary, #b5bac1);
+}
+
+.spyt-live-key-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.spyt-live-key-input {
+    flex: 1;
+    min-width: 0;
+    height: 40px;
+    padding: 0 12px;
+    border-radius: 8px;
+    border: 1px solid var(--input-border, rgba(255, 255, 255, 0.12));
+    background: var(--input-background, #1e1f22);
+    color: var(--text-default, #dbdee1);
+    font-size: 16px;
+    font-family: var(--font-primary, inherit);
+    outline: none;
+}
+
+.spyt-live-key-input:focus {
+    border-color: var(--brand-500, #5865f2);
+}
+
+.spyt-live-key-input::placeholder {
+    color: var(--text-muted, #949ba4);
+}
+
+.spyt-live-key-eye {
+    appearance: none;
+    flex: 0 0 40px;
+    width: 40px;
+    height: 40px;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--input-border, rgba(255, 255, 255, 0.12));
+    border-radius: 8px;
+    background: var(--input-background, #1e1f22);
+    color: var(--interactive-normal, #b5bac1);
+    cursor: pointer;
+}
+
+.spyt-live-key-eye:hover {
+    color: var(--interactive-hover, #fff);
+    background: var(--background-modifier-hover, rgba(255, 255, 255, 0.08));
+}
+
+.spyt-live-key-eye[aria-pressed="true"] {
+    color: var(--brand-400, #949cf7);
 }

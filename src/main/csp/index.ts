@@ -60,6 +60,8 @@ export const CspPolicies: PolicyMap = {
     "archive.org": ConnectSrc,
     "*.archive.org": ConnectSrc,
     "translate-pa.googleapis.com": ConnectSrc, // Google Translate API
+    "openrouter.ai": ConnectSrc, // LiveVoiceTranslate (API) OpenRouter speech
+    "*.openrouter.ai": ConnectSrc,
     "huggingface.co": ImageScriptsAndCssSrc, // LiveVoiceTranslate Whisper models
     "*.huggingface.co": ImageScriptsAndCssSrc,
     "*.hf.co": ImageScriptsAndCssSrc,

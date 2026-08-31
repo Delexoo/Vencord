@@ -5,15 +5,16 @@
  */
 
 import { Delexo } from "../_delexo/author";
-import { languagePairLabel } from "../_delexo/langNames";
+import { isJunkTranscript, languagePairLabel } from "../_delexo/langNames";
 import * as Ultra from "../_delexo/ultraVoiceOverlay";
 import { definePluginSettings } from "@api/Settings";
 import definePlugin, { OptionType } from "@utils/types";
+import { React, Text, useState } from "@webpack/common";
 
 import * as Engine from "./engine";
 import managedStyle from "./style.css?managed";
 
-const ULTRA_OWNER = "free";
+const ULTRA_OWNER = "api";
 
 const MIN_W = 180;
 const MIN_H = 96;
@@ -46,7 +47,79 @@ const TO_LANGS: [string, string][] = [
     ["ko", "Korean"],
 ];
 
+function EyeGlyph({ off }: { off: boolean; }) {
+    return off ? (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+            <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+            <line x1="1" y1="1" x2="23" y2="23" />
+        </svg>
+    ) : (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+            <circle cx="12" cy="12" r="3" />
+        </svg>
+    );
+}
+
+function ApiKeyField() {
+    const [show, setShow] = useState(false);
+    const [value, setValue] = useState(() => String(settings.store.openaiApiKey || ""));
+
+    function onChange(event: React.ChangeEvent<HTMLInputElement>) {
+        const next = event.target.value;
+        setValue(next);
+        settings.store.openaiApiKey = next;
+        Engine.setApiKey(next.trim());
+    }
+
+    return (
+        <div className="spyt-live-key">
+            <Text className="spyt-live-key-title" variant="text-md/medium">OpenRouter API key</Text>
+            <Text className="spyt-live-key-desc" variant="text-sm/normal">Paste your OpenRouter key here. It stays hidden until you tap the eye.</Text>
+            <div className="spyt-live-key-row">
+                <input
+                    className="spyt-live-key-input"
+                    type={show ? "text" : "password"}
+                    value={value}
+                    onChange={onChange}
+                    placeholder="sk-or-v1-..."
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
+                    name="openrouter-api-key"
+                />
+                <button
+                    className="spyt-live-key-eye"
+                    type="button"
+                    aria-label={show ? "Hide API key" : "Show API key"}
+                    aria-pressed={show}
+                    onClick={() => setShow(on => !on)}
+                >
+                    <EyeGlyph off={show} />
+                </button>
+            </div>
+        </div>
+    );
+}
+
 const settings = definePluginSettings({
+    apiKeyField: {
+        type: OptionType.COMPONENT,
+        component: ApiKeyField
+    },
+    openaiApiKey: {
+        type: OptionType.STRING,
+        displayName: "OpenRouter API key",
+        description: "Paste your OpenRouter key here.",
+        placeholder: "sk-or-v1-...",
+        default: "",
+        hidden: true,
+        onChange(v: string) {
+            Engine.setApiKey(String(v || "").trim());
+        }
+    },
     showOriginal: {
         type: OptionType.BOOLEAN,
         description: "Show the heard/original line as well as the translation",
@@ -63,7 +136,7 @@ const settings = definePluginSettings({
         default: true,
         onChange(v: boolean) {
             if (v) mount();
-            else unmount();
+            else void unmount();
         }
     },
     fromLang: {
@@ -80,6 +153,14 @@ const settings = definePluginSettings({
         type: OptionType.STRING,
         description: "What to listen to: discord, system, or mic",
         default: "discord"
+    },
+    openaiModel: {
+        type: OptionType.SELECT,
+        description: "OpenRouter speech model",
+        options: [
+            { label: "openai/gpt-4o-transcribe (more accurate)", value: "openai/gpt-4o-transcribe", default: true },
+            { label: "openai/whisper-1 (cheaper)", value: "openai/whisper-1" }
+        ]
     },
     advancedOpen: {
         type: OptionType.BOOLEAN,
@@ -180,11 +261,11 @@ function dropdownHtml(which: "from" | "to", list: [string, string][], selected: 
 function sourceHint(source: Engine.AudioSource) {
     switch (source) {
         case "discord":
-            return "Uses Windows Live Captions (Win+Ctrl+L). Set captions to system audio so Discord voice is included.";
+            return "This Discord window. Voice calls on Windows often need System audio.";
         case "system":
-            return "Uses Windows Live Captions on all PC audio. No API key.";
+            return "All PC audio: Discord, games, browsers, and other apps.";
         case "mic":
-            return "Browser speech recognition. No API key.";
+            return "Your microphone only.";
         default: {
             const _: never = source;
             return _;
@@ -195,6 +276,9 @@ function sourceHint(source: Engine.AudioSource) {
 function syncEngineLangs() {
     Engine.setLanguages(settings.store.fromLang || "auto", settings.store.toLang || "en");
     Engine.setAudioSource(Engine.parseAudioSource(settings.store.audioSource));
+    const fromSettings = (settings.store.openaiApiKey || "").trim();
+    if (fromSettings) Engine.setApiKey(fromSettings);
+    Engine.setModel(String(settings.store.openaiModel || "openai/gpt-4o-transcribe"));
 }
 
 function currentSource() {
@@ -230,7 +314,7 @@ function mount() {
     syncEngineLangs();
 
     root = document.createElement("div");
-    root.id = "spyt-live-root";
+    root.id = "spyt-live2-root";
     applySize(settings.store.overlayWidth, settings.store.overlayHeight);
     if (settings.store.collapsed) root.classList.add("spyt-live-min");
     if (settings.store.advancedOpen) root.classList.add("spyt-adv-open");
@@ -242,7 +326,7 @@ function mount() {
                     <span class="spyt-live-grip" aria-hidden="true"></span>
                     <span class="spyt-live-dot" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
                     <div class="spyt-live-titles">
-                        <strong>Live Translate (FREE)</strong>
+                        <strong>Live Translate (API)</strong>
                         <span class="spyt-live-status">Ready</span>
                     </div>
                 </div>
@@ -290,9 +374,11 @@ function mount() {
     renderFeed(Engine.getSnapshot(), false, false);
     Ultra.setUltraEnabled(ULTRA_OWNER, settings.store.ultraVoiceOverlay);
     poll();
-
-    if (settings.store.autoListen)
-        void startListen();
+    void Engine.loadApiKeyFromEnv().then(key => {
+        if (key) setStatus("OpenRouter ready");
+        else setStatus("Add OpenRouter key in plugin settings");
+        if (settings.store.autoListen && key) void startListen();
+    });
 }
 
 function startUiLoop() {
@@ -306,14 +392,15 @@ function stopUiLoop() {
     timer = null;
 }
 
-function unmount() {
+async function unmount() {
     stopUiLoop();
     overlayAc?.abort();
     overlayAc = null;
     window.removeEventListener("pointerdown", onDocPointer);
     closeDropdowns();
     expandedKeys.clear();
-    void Engine.stopListening();
+    await Engine.stopListening();
+    await Engine.savePersistedHistoryNow();
     Ultra.disposeUltra(ULTRA_OWNER);
     root?.remove();
     root = null;
@@ -554,6 +641,16 @@ function setListenLook(on: boolean, label: string) {
     btn.setAttribute("aria-pressed", on ? "true" : "false");
 }
 
+function hasApiKey() {
+    return Engine.hasApiKey() || Boolean((settings.store.openaiApiKey || "").trim());
+}
+
+function requireApiKey() {
+    if (hasApiKey()) return true;
+    setStatus("Add OpenRouter key in plugin settings");
+    return false;
+}
+
 function paintStopped() {
     stopUiLoop();
     setListenLook(false, "Listen");
@@ -568,11 +665,13 @@ function paintStopped() {
 
 async function startListen() {
     if (startInFlight || stopInFlight || Engine.isListening()) return;
+    syncEngineLangs();
+    await Engine.loadApiKeyFromEnv();
+    if (!requireApiKey()) return;
     const session = ++listenSession;
     startInFlight = true;
     optimisticListen = true;
     settings.store.autoListen = true;
-    syncEngineLangs();
     setListenLook(true, "Stop");
     setStatus("Starting…");
     try {
@@ -602,8 +701,7 @@ async function stopListen() {
     optimisticListen = false;
     settings.store.autoListen = false;
     setListenLook(false, "Listen");
-    setStatus("Stopped");
-    stopUiLoop();
+    startUiLoop();
     try {
         await Engine.stopListening();
     } finally {
@@ -693,7 +791,14 @@ function toggleLineOpen(plus: HTMLButtonElement) {
 }
 
 function historyRows(data: Engine.EngineSnapshot): Engine.HistoryRow[] {
-    const rows = data.history.filter(row => row.original || row.translation);
+    const rows = data.history.filter(row => {
+        const original = (row.original || "").trim();
+        const translation = (row.translation || "").trim();
+        if (!original && !translation) return false;
+        if (original && isJunkTranscript(original)) return false;
+        if (translation && isJunkTranscript(translation)) return false;
+        return true;
+    });
     if (!rows.length && (data.original || data.translation))
         rows.push({
             original: data.original,
@@ -708,6 +813,7 @@ function emptyCaption(listening: boolean, hearing: boolean, partial: boolean) {
     if (partial) return "Transcribing…";
     if (listening && hearing) return "Hearing…";
     if (listening) return "Listening…";
+    if (!hasApiKey()) return "Add OpenRouter key in plugin settings";
     return "Press Listen";
 }
 
@@ -971,10 +1077,10 @@ function makeResizable(box: HTMLElement, signal: AbortSignal) {
 }
 
 export default definePlugin({
-    name: "LiveVoiceTranslate (FREE)",
-    description: "Live translation without an API key. Mic uses the browser; Discord/System uses Windows Live Captions.",
+    name: "LiveVoiceTranslate (API)",
+    description: "Live translation with an OpenRouter API key. Paste the key in this plugin’s settings.",
     tags: ["Voice", "Utility"],
-    searchTerms: ["translate", "speech", "caption", "tagalog", "delexo"],
+    searchTerms: ["translate", "speech", "caption", "openai", "tagalog", "delexo"],
     authors: [Delexo],
     settings,
     managedStyle,
@@ -983,7 +1089,6 @@ export default definePlugin({
         if (settings.store.showOverlay) mount();
     },
     async stop() {
-        await Engine.savePersistedHistoryNow();
-        unmount();
+        await unmount();
     }
 });
